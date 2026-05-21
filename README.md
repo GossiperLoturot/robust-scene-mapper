@@ -1,5 +1,7 @@
 # Robust-Scene-Mapper
 
+![GitHub Release](https://img.shields.io/github/v/release/GossiperLoturot/robust-scene-mapper)
+
 A robust 3D reconstruction pipeline designed to handle lens distortion, occlusions, and sensor noise.
 
 ## Features
