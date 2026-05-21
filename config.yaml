@@ -1,0 +1,16 @@
+global:
+  database: "/mnt/d/study-2025/tasks.db"
+
+dispatch:
+  input_dir: "/mnt/d/study-2025/video-internet"
+  fps: 8
+  width: 512
+  height: 288
+  mask_classes: [0, 1, 2, 3, 5, 7]  # person, bicycle, car, motorcycle, bus, truck
+  max_keypoints: 8000
+  depth_confidence: 0.95
+  width_confidence: 0.99
+  init_frame_width: 512
+  init_frame_height: 288
+  init_focal_length: 300.0
+  seg_classes: ["road", "sidewalk", "white line", "road sign", "utility pole", "fence", "building", "vegetation", "tree"]

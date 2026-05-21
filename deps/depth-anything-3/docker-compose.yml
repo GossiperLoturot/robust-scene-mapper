@@ -1,0 +1,12 @@
+services:
+  task:
+    image: depth-anything-3:2605
+    build:
+      context: .
+    volumes:
+      - /tmp/depth-anything-3:/depth-anything-3/data:rw
+    runtime: nvidia
+    command: >
+      /bin/bash -c "echo START &&
+      da3 auto data/input --export-dir data/output --export-format mini_npz --process-res 256 --no-align-to-input-ext-scale --auto-cleanup &&
+      chown -R ${UID:-1000}:${GID:-1000} data/output"
