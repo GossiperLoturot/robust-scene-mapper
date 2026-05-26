@@ -1,0 +1,17 @@
+services:
+  task:
+    image: gaussian-splatting:2605
+    build:
+      context: .
+    volumes:
+      - /tmp/gaussian-splatting:/gaussian-splatting/data:rw
+      - /tmp/gaussian-splatting/output:/gaussian-splatting/outputs:rw
+    runtime: nvidia
+    environment:
+      - TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
+    command: >
+      /bin/bash -c "echo START &&
+      python3 utils/estimate_dataset_depths.py data/input &&
+      python3 main.py fit --config configs/depth_regularization/estimated_inverse_depth-l1.yaml --data.path data/input --data.image_on_cpu false --data.image_uint8 true --data.parser Colmap -n 3dgs &&
+      python3 utils/ckpt2ply.py outputs/3dgs &&
+      chown -R ${UID:-1000}:${GID:-1000} data/input outputs"

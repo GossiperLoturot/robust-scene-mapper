@@ -5,7 +5,7 @@
     <title>Viewer</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a1a1a; }
-        #ui-container { position: absolute; top: 10px; left: 10px; z-index: 10; }
+        #ui-container { position: absolute; top: 10px; left: 10px; z-index: 10; color: #fefefe; }
         #canvas-container { width: 100vw; height: 100vh; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -14,8 +14,9 @@
 <body>
     <div id="ui-container">
         <!-- ui elements here -->
-        <input type="checkbox" id="toggle-color">
-        <select id="class-select"></select>
+        <input type="checkbox" id="toggle-polygon" checked>ポリゴン表示<br>
+        <input type="checkbox" id="toggle-points" checked>点群表示<br>
+        <input type="checkbox" id="toggle-color"><select id="class-select"></select>
     </div>
 
     <div id="canvas-container"></div>
@@ -57,15 +58,18 @@
         geometry.setAttribute("color", new THREE.BufferAttribute(colorsArray, 3));
         geometry.setIndex(new THREE.BufferAttribute(indicesArray, 1));
         geometry.computeVertexNormals();
+        const material = new THREE.MeshStandardMaterial({ color: 0x3498db, roughness: 0.5, metalness: 0.2, side: THREE.DoubleSide });
+        const meshObject = new THREE.Mesh(geometry, material);
+        scene.add(meshObject);
 
-        const material = new THREE.MeshStandardMaterial({ 
-            color: 0x3498db, 
-            roughness: 0.5,
-            metalness: 0.2,
-            side: THREE.DoubleSide 
-        });
-        const mesh = new THREE.Mesh(geometry, material);
-        scene.add(mesh);
+        const pointsGeometry = new THREE.BufferGeometry();
+        const pointVerticesArray = new Float32Array(meshData.point_vertices);
+        const pointColorsArray = new Float32Array(meshData.point_colors);
+        pointsGeometry.setAttribute("position", new THREE.BufferAttribute(pointVerticesArray, 3));
+        pointsGeometry.setAttribute("color", new THREE.BufferAttribute(pointColorsArray, 3));
+        const pointsMaterial = new THREE.PointsMaterial({ size: 0.1, vertexColors: true, sizeAttenuation: true });
+        const pointsObject = new THREE.Points(pointsGeometry, pointsMaterial);
+        scene.add(pointsObject);
 
         function animate() {
             requestAnimationFrame(animate);
@@ -81,7 +85,15 @@
             controls.handleResize();
         });
 
-        // クラス選択のオプションを動的に生成
+        // ポリゴン表示のイベントリスナー
+        const togglePolygonCheckbox = document.getElementById("toggle-polygon");
+        togglePolygonCheckbox.addEventListener("change", (e) => { meshObject.visible = e.target.checked; });
+
+        // ポイント表示のイベントリスナー
+        const togglePointsCheckbox = document.getElementById("toggle-points");
+        togglePointsCheckbox.addEventListener("change", (e) => { pointsObject.visible = e.target.checked; });
+
+        // クラス選択の選択肢を動的に生成
         const classSelect = document.getElementById("class-select");
         const totalClasses = meshData.classes[0] ? meshData.classes[0].length : 0;
         for (let i = 0; i < totalClasses; i++) {
@@ -90,12 +102,12 @@
             option.textContent = `クラス ${i}`;
             classSelect.appendChild(option);
         }
+        classSelect.value = -1;
 
         // クラス選択のイベントリスナー
         classSelect.addEventListener("change", (e) => {
             const classIndex = parseInt(e.target.value, 10);
-            console.log(`selected class index: ${classIndex}`);
-
+            if (classIndex == -1) return;
             const values = meshData.classes.map(v => v[classIndex]);
             const colorAttribute = geometry.getAttribute("color");
             for (let i = 0; i < values.length; i++) {
@@ -107,7 +119,7 @@
             colorAttribute.needsUpdate = true;
         });
 
-        // カラートグルのイベントリスナー
+        // クラス選択着色のイベントリスナー
         const toggleColorCheckbox = document.getElementById("toggle-color");
         toggleColorCheckbox.addEventListener("change", (e) => {
             material.vertexColors = e.target.checked;

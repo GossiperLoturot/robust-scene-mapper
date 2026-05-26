@@ -11,6 +11,16 @@ struct Args {
 #[derive(clap::Subcommand, Debug)]
 enum Command {
     List,
+    Unpack {
+        #[arg(long)]
+        task_id: usize,
+        #[arg(long, default_value = "output")]
+        output: std::path::PathBuf,
+    },
+    Remove {
+        #[arg(long)]
+        task_id: usize,
+    },
     View {
         #[arg(long)]
         task_id: usize,
@@ -24,6 +34,8 @@ struct MeshData {
     vertices: Vec<f32>,
     indices: Vec<u32>,
     classes: Vec<Vec<f32>>,
+    point_vertices: Vec<f32>,
+    point_colors: Vec<f32>,
 }
 
 #[tokio::main]
@@ -46,12 +58,14 @@ async fn main() {
 
     match args.command {
         Command::List => list_tasks(&pool).await,
+        Command::Unpack { task_id, output } => unpack_task(&pool, task_id, output).await,
+        Command::Remove { task_id } => remove_task(&pool, task_id).await,
         Command::View { task_id, output } => view_task(&pool, task_id, output).await,
     }
 }
 
 async fn list_tasks(pool: &sqlx::SqlitePool) {
-    let task_rows: Vec<(i64, String, String)> = sqlx::query_as("SELECT id, task_name, params_json FROM tasks WHERE task_name = 'FinalizeTask' ORDER BY id")
+    let task_rows: Vec<(i64, String, String)> = sqlx::query_as("SELECT id, task_name, params_json FROM tasks ORDER BY id")
         .fetch_all(pool)
         .await
         .unwrap();
@@ -61,19 +75,42 @@ async fn list_tasks(pool: &sqlx::SqlitePool) {
     }
 }
 
+async fn unpack_task(pool: &sqlx::SqlitePool, task_id: usize, output: std::path::PathBuf) {
+    let artifact: (Vec<u8>,) = sqlx::query_as("SELECT artifact FROM tasks WHERE id = ?")
+        .bind(task_id as i64)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let decoder = flate2::read::GzDecoder::new(artifact.0.as_slice());
+    let mut archive = tar::Archive::new(decoder);
+    println!("extracted artifact.");
+
+    std::fs::create_dir_all(&output).unwrap();
+    archive.unpack(&output).unwrap();
+}
+
+async fn remove_task(pool: &sqlx::SqlitePool, task_id: usize) {
+    sqlx::query("DELETE FROM tasks WHERE id = ?")
+        .bind(task_id as i64)
+        .execute(pool)
+        .await
+        .unwrap();
+    println!("remove task.");
+}
+
 async fn view_task(pool: &sqlx::SqlitePool, task_id: usize, output: std::path::PathBuf) {
     let artifact: (Vec<u8>,) = sqlx::query_as("SELECT artifact FROM tasks WHERE id = ?")
         .bind(task_id as i64)
         .fetch_one(pool)
         .await
         .unwrap();
-    let dir = tempfile::tempdir().unwrap();
+    let temp_dir = tempfile::tempdir().unwrap();
     let decoder = flate2::read::GzDecoder::new(artifact.0.as_slice());
     let mut archive = tar::Archive::new(decoder);
-    archive.unpack(dir.path()).unwrap();
+    archive.unpack(temp_dir.path()).unwrap();
     println!("extracted artifact.");
     
-    let database_url = dir.path().join("finalize.db")
+    let database_url = temp_dir.path().join("finalize.db")
         .to_string_lossy().to_string();
     let opt = sqlx::sqlite::SqliteConnectOptions::from_str(&database_url)
         .unwrap()
@@ -92,7 +129,17 @@ async fn view_task(pool: &sqlx::SqlitePool, task_id: usize, output: std::path::P
         .fetch_all(&pool)
         .await
         .unwrap();
-    println!("vertices: {}, indices: {}, classes: {}", vertex_rows.len(), index_rows.len(), class_rows.len());
+    let point_rows: Vec<(f64, f64, f64, i64, i64, i64)> = sqlx::query_as("SELECT x, y, z, r, g, b FROM dense_points ORDER BY id")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    println!(
+        "vertices: {}, indices: {}, classes: {}, points: {}",
+        vertex_rows.len(),
+        index_rows.len(),
+        class_rows.len(),
+        point_rows.len()
+    );
 
     let mut vertices = Vec::with_capacity(vertex_rows.len() * 3);
     for (x, y, z) in vertex_rows.iter() {
@@ -121,7 +168,17 @@ async fn view_task(pool: &sqlx::SqlitePool, task_id: usize, output: std::path::P
             vclasses[indices_slice[2] as usize][j] += class_vec[j];
         }
     }
-    let mesh_data = MeshData { vertices, indices, classes: vclasses };
+    let mut point_vertices = Vec::with_capacity(point_rows.len() * 3);
+    let mut point_colors = Vec::with_capacity(point_rows.len() * 3);
+    for (x, y, z, r, g, b) in point_rows.iter() {
+        point_vertices.push(*x as f32);
+        point_vertices.push(*y as f32);
+        point_vertices.push(*z as f32);
+        point_colors. push(*r as f32 / 255.0);
+        point_colors. push(*g as f32 / 255.0);
+        point_colors. push(*b as f32 / 255.0);
+    }
+    let mesh_data = MeshData { vertices, indices, classes: vclasses, point_vertices, point_colors };
 
     // export html
     let mut jinja_env = minijinja::Environment::new();
