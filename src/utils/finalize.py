@@ -6,10 +6,9 @@ import subprocess
 
 import cv2
 import numpy as np
-import open3d as o3d
-import pandas as pd
 import pycocotools.mask
 import pycolmap
+import trimesh
 
 import utils.metric_depth
 
@@ -140,34 +139,34 @@ def finalize(conn: sqlite3.Connection, scale_path: str, segmentation_dir: str, d
             )
 
     # write sparse points
-    sparse_points = pd.DataFrame()
+    rows = []
     for id in sparse_model.point3D_ids():
         point = sparse_model.point3D(id)
-        x, y, z = point.xyz
-        r, g, b = point.color
-        sparse_points.loc[id, "x"] = x.astype(np.float32)
-        sparse_points.loc[id, "y"] = y.astype(np.float32)
-        sparse_points.loc[id, "z"] = z.astype(np.float32)
-        sparse_points.loc[id, "r"] = r.astype(np.uint8)
-        sparse_points.loc[id, "g"] = g.astype(np.uint8)
-        sparse_points.loc[id, "b"] = b.astype(np.uint8)
-    sparse_points.to_sql("sparse_points", conn, if_exists="append", index_label="id")
+        x, y, z = point.xyz.astype(np.float32)
+        r, g, b = point.color.astype(np.uint8)
+        rows.append((id, float(x), float(y), float(z), int(r), int(g), int(b)))
+    conn.executemany("INSERT INTO sparse_points VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
 
     # write dense points
     dense_path = os.path.join(dense_dir, "fused.ply")
-    dense_points = o3d.io.read_point_cloud(dense_path)
-    points = pd.DataFrame(np.asarray(dense_points.points).astype(np.float32), columns=["x", "y", "z"])
-    colors = pd.DataFrame((np.asarray(dense_points.colors) * 255).astype(np.uint8), columns=["r", "g", "b"])
-    dense_points = points.join(colors)
-    dense_points.to_sql("dense_points", conn, if_exists="append", index_label="id")
+    dense_points = trimesh.load_scene(dense_path).to_geometry()
+    assert isinstance(dense_points, trimesh.PointCloud)
+    verts = dense_points.vertices.astype(np.float32)
+    colors = dense_points.colors.astype(np.uint8)
+    points = np.concatenate([verts, colors], axis=1)
+    rows = [(i, float(x), float(y), float(z), int(r), int(g), int(b)) for i, (x, y, z, r, g, b, _) in enumerate(points)]
+    conn.executemany("INSERT INTO dense_points VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
 
     # write triangle mesh (verts and faces)
     mesh_path = os.path.join(dense_dir, "meshed-delaunay.ply")
-    mesh = o3d.io.read_triangle_mesh(mesh_path)
-    verts = pd.DataFrame(np.asarray(mesh.vertices).astype(np.float32), columns=["x", "y", "z"])
-    verts.to_sql("verts", conn, if_exists="append", index_label="id")
-    faces = pd.DataFrame(np.asarray(mesh.triangles).astype(np.int32), columns=["v1", "v2", "v3"])
-    faces.to_sql("faces", conn, if_exists="append", index_label="id")
+    mesh = trimesh.load_scene(mesh_path).to_geometry()
+    assert isinstance(mesh, trimesh.Trimesh)
+    verts = mesh.vertices.astype(np.float32)
+    rows = [(i, float(x), float(y), float(z)) for i, (x, y, z) in enumerate(verts)]
+    conn.executemany("INSERT INTO verts VALUES (?, ?, ?, ?)", rows)
+    faces = mesh.faces.astype(np.int32)
+    rows = [(i, int(v1), int(v2), int(v3)) for i, (v1, v2, v3) in enumerate(faces)]
+    conn.executemany("INSERT INTO faces VALUES (?, ?, ?, ?)", rows)
 
 
 def run_cubic_segmentation(bin_parent_dir: str, db_path: str, seg_classes: list[str]):

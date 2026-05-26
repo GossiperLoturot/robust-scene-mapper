@@ -3,6 +3,7 @@ import math
 import os
 
 import kornia
+import kornia.core.utils
 import numpy as np
 import torch
 
@@ -38,7 +39,7 @@ class CameraMapping:
 
 # 指定されたディレクトリから画像とマスクを読み込み、korniaの形式で返す
 def load_image_masks(image_dir: str, mask_dir: str) -> list[ImageMask]:
-    device = kornia.utils.get_cuda_or_mps_device_if_available()
+    device = kornia.core.utils.get_cuda_or_mps_device_if_available()
 
     image_paths = list[str]()
     for filename in sorted(os.listdir(image_dir)):
@@ -87,7 +88,7 @@ def extract_feature_and_match(
     depth_confidence: float,
     width_confidence: float,
 ) -> FeatureMatchingResult:
-    device = kornia.utils.get_cuda_or_mps_device_if_available()
+    device = kornia.core.utils.get_cuda_or_mps_device_if_available()
 
     image_paths = dict[int, str]()
     image_sizes = dict[int, tuple[int, int]]()
@@ -96,8 +97,8 @@ def extract_feature_and_match(
     lafs_dict = dict[int, torch.Tensor]()  # local affin frame
     matches_dict = dict[tuple[int, int], np.ndarray]()
 
-    model_disk = kornia.feature.DISK.from_pretrained("depth").eval().to(device)
-    model_lg = kornia.feature.LightGlueMatcher("disk", { "depth_confidence": depth_confidence, "width_confidence": width_confidence }).eval().to(device)
+    model_disk = kornia.feature.DISK.from_pretrained("depth").to(device).eval()
+    model_lg = kornia.feature.LightGlueMatcher("disk", { "depth_confidence": depth_confidence, "width_confidence": width_confidence }).to(device).eval()
     for i in matching_pairs.image_indices:
         image_mask = image_masks[i]
 

@@ -50,7 +50,8 @@ class ObjectMaskingTask(luigi.Task):
                 image_paths.append(image_path)
 
             model = ultralytics.YOLO("yolo11n-seg.pt")
-            for result in model(image_paths, classes=self.mask_classes, conf=0.5, verbose=False):
+            results = model(image_paths, classes=self.mask_classes, conf=0.5, verbose=False)
+            for result, image_path in zip(results, image_paths):
                 mask = np.full(result.orig_shape, 255, np.uint8)
                 contours = []
                 for contour in result:
@@ -58,7 +59,7 @@ class ObjectMaskingTask(luigi.Task):
                     contours.append(contour)
                 cv2.drawContours(mask, contours, -1, [0, 0, 0], cv2.FILLED)
 
-                basename = os.path.basename(result.path)
+                basename = os.path.basename(image_path)
                 mask_path = os.path.join(mask_dir, basename)
                 cv2.imwrite(mask_path, mask)
 
