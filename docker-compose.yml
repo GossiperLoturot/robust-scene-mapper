@@ -1,0 +1,12 @@
+services:
+  app:
+    build:
+      context: .
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - /tmp:/tmp
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
+    gpus: all

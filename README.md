@@ -28,9 +28,8 @@ The pipeline integrates state-of-the-art models and tools across five key stages
 Ensure you have the following tools installed on your host system:
 
 * GNU Make
-* uv (Python package manager)
-* Cargo (Rust package manager)
-* Docker Engine (with NVIDIA Container Toolkit for CUDA acceleration)
+* Docker Engine with Docker Compose
+* NVIDIA Container Toolkit (for CUDA acceleration)
 
 ## Quick Start
 
@@ -55,8 +54,16 @@ vi config.yaml
 
 ### 3. Run the Pipeline
 
-Execute the full pipeline using the provided Makefile:
+Build the unified runtime container first:
+
+```bash
+make dev-build
+```
+
+Then execute the full pipeline using the provided Makefile:
 
 ```bash
 make run
 ```
+
+`make run`, `make dev-check`, and `make view` now execute inside the same container image, so host-side Python or Cargo environments are no longer required.

@@ -1,23 +1,20 @@
 .PHONY: dev-build dev-check run view
 
+CONTAINER_RUNTIME = docker compose
+CONTAINER_EXEC = $(CONTAINER_RUNTIME) run --rm app
+
 dev-build:
-	@echo "installing dependencies"
-	@uv sync
-	@echo "build cubic-segmentation"
-	@cd deps/cubic-segmentation && cargo build --release
-	@echo "build viewer"
-	@cd deps/viewer && cargo build --release
-	@echo "check docker engine availability"
-	@docker version
+	@echo "building unified runtime container"
+	@$(CONTAINER_RUNTIME) build app
 
 dev-check:
 	@echo "running ruff check"
-	@uv run ruff check
+	@$(CONTAINER_EXEC) ruff check
 
 run:
 	@echo "running application"
-	@uv run src/main.py
+	@$(CONTAINER_EXEC) python src/main.py
 
 view:
 	@echo "running viewer"
-	@./deps/viewer/viewer $(ARGS)
+	@$(CONTAINER_EXEC) ./deps/viewer/viewer $(ARGS)
