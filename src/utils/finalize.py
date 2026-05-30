@@ -169,11 +169,11 @@ def finalize(conn: sqlite3.Connection, scale_path: str, segmentation_dir: str, d
     conn.executemany("INSERT INTO faces VALUES (?, ?, ?, ?)", rows)
 
 
-def run_cubic_segmentation(bin_parent_dir: str, db_path: str, seg_classes: list[str]):
+def run_cubic_segmentation(db_path: str, seg_classes: list[str]):
     prompt = ".".join(seg_classes)
-    with subprocess.Popen(["./cubic-segmentation", "raycast", db_path, prompt], cwd=bin_parent_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as proc:
+    with subprocess.Popen(["cubic-segmentation", "raycast", db_path, prompt], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as proc:
         if proc.stdout:
             for line in proc.stdout:
                 print(line, end="", flush=True)
         if proc.wait() != 0:
-            raise RuntimeError(f"failed to run cubic-segmentation. bin parent_dir: {bin_parent_dir}, database: {db_path}, prompt: {prompt}")
+            raise RuntimeError(f"failed to run cubic-segmentation. database: {db_path}, prompt: {prompt}")

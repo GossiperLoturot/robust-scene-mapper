@@ -12,7 +12,7 @@ import utils.docker
 import utils.task
 
 
-CONTAINER_CONF_DIR = "deps/colmap-cuda"
+RUNTIME_STAGE = "colmap-cuda"
 CONTAINER_DATA_DIR = "/tmp/colmap-cuda"
 
 
@@ -76,7 +76,7 @@ class MultiviewStereoTask(luigi.Task):
             shutil.rmtree(CONTAINER_DATA_DIR, ignore_errors=True)
             shutil.move(undistort_dir, CONTAINER_DATA_DIR)
 
-            utils.docker.run_docker_compose(CONTAINER_CONF_DIR)
+            utils.docker.run_stage(RUNTIME_STAGE)
 
             # move dense results
             dense_dir = os.path.join(temp_dir, "dense")

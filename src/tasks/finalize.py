@@ -12,9 +12,6 @@ import utils.finalize
 import utils.task
 
 
-BIN_PARENT_DIR = "deps/cubic-segmentation"
-
-
 class FinalizeTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
@@ -97,7 +94,7 @@ class FinalizeTask(luigi.Task):
             ctx.logger.info("finalized database")
 
             ctx.logger.info("cubic-segmentation")
-            utils.finalize.run_cubic_segmentation(BIN_PARENT_DIR, db_path, self.seg_classes)
+            utils.finalize.run_cubic_segmentation(db_path, self.seg_classes)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()

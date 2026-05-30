@@ -6,10 +6,6 @@ CONTAINER_EXEC = $(CONTAINER_RUNTIME) run --rm app
 dev-build:
 	@echo "building unified runtime container"
 	@$(CONTAINER_RUNTIME) build app
-	@echo "build cubic-segmentation"
-	@$(CONTAINER_EXEC) bash -lc "cd deps/cubic-segmentation && cargo build --release"
-	@echo "build viewer"
-	@$(CONTAINER_EXEC) bash -lc "cd deps/viewer && cargo build --release"
 
 dev-check:
 	@echo "running ruff check"
@@ -21,4 +17,4 @@ run:
 
 view:
 	@echo "running viewer"
-	@$(CONTAINER_EXEC) ./deps/viewer/viewer $(ARGS)
+	@$(CONTAINER_EXEC) python src/viewer.py $(ARGS)

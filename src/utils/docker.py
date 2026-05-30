@@ -82,16 +82,19 @@ def _run_gaussian_splatting(data_dir: str):
     _run_process(["python", "utils/ckpt2ply.py", "outputs/3dgs"], cwd=str(GAUSSIAN_SPLATTING_DIR))
 
 
-def run_docker_compose(container_conf_dir: str):
+def run_stage(stage_name: str):
     _ = context.Context()
-    conf_name = pathlib.Path(container_conf_dir).name
-    if conf_name == "colmap-cuda":
+    if stage_name == "colmap-cuda":
         _run_colmap_cuda("/tmp/colmap-cuda")
-    elif conf_name == "depth-anything-3":
+    elif stage_name == "depth-anything-3":
         _run_depth_anything("/tmp/depth-anything-3")
-    elif conf_name == "grounded-sam-2":
+    elif stage_name == "grounded-sam-2":
         _run_grounded_sam("/tmp/grounded-sam-2")
-    elif conf_name == "gaussian-splatting":
+    elif stage_name == "gaussian-splatting":
         _run_gaussian_splatting("/tmp/gaussian-splatting")
     else:
-        raise RuntimeError(f"unsupported container configuration: {container_conf_dir}")
+        raise RuntimeError(f"unsupported runtime stage: {stage_name}")
+
+
+def run_docker_compose(container_conf_dir: str):
+    run_stage(pathlib.Path(container_conf_dir).name)

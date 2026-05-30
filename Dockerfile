@@ -44,19 +44,7 @@ RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 
 WORKDIR /workspace
 
-RUN pip install ruff \
-    "kornia>=0.8.1" \
-    "luigi>=3.8.1" \
-    "numpy>=2.2.6" \
-    "opencv-python>=4.12.0.88" \
-    "pycocotools>=2.0.11" \
-    "pycolmap>=4.0.4" \
-    "pyyaml>=6.0.2" \
-    "rich>=15.0.0" \
-    "scipy>=1.16.1" \
-    "torch>=2.8.0" \
-    "trimesh>=4.12.2" \
-    "ultralytics>=8.3.145"
+RUN pip install ruff
 
 RUN git clone https://github.com/colmap/colmap.git /opt/colmap --recursive \
     && cd /opt/colmap \
@@ -91,7 +79,6 @@ RUN cd /opt/gaussian-splatting && pip install \
     "wandb" \
     "tqdm" \
     "viser==0.2.3" \
-    "opencv-python-headless==4.10.*" \
     "matplotlib" \
     "mediapy==1.2.2" \
     "torchmetrics==1.7.3"
@@ -121,6 +108,12 @@ RUN cd /opt/gaussian-splatting \
     && mkdir checkpoints
 
 COPY . /workspace
+
+RUN pip install .
+
+RUN cd /workspace/deps/cubic-segmentation \
+    && cargo build --release \
+    && cp target/release/cubic-segmentation /usr/local/bin/cubic-segmentation
 
 RUN chmod +x /workspace/docker/entrypoint.sh
 

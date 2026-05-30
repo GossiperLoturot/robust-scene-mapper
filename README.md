@@ -66,4 +66,4 @@ Then execute the full pipeline using the provided Makefile:
 make run
 ```
 
-`make run`, `make dev-check`, and `make view` now execute inside the same container image, so host-side Python or Cargo environments are no longer required.
+`make run`, `make dev-check`, and `make view` now execute inside the same container image, so host-side Python or Cargo environments are no longer required. The viewer command is implemented in Python (`src/viewer.py`) and no longer depends on the Rust viewer binary.

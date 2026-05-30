@@ -12,7 +12,7 @@ import utils.docker
 import utils.task
 
 
-CONTAINER_CONF_DIR = "deps/gaussian-splatting"
+RUNTIME_STAGE = "gaussian-splatting"
 CONTAINER_DATA_DIR = "/tmp/gaussian-splatting"
 
 
@@ -77,7 +77,7 @@ class GaussianSplattingTask(luigi.Task):
             os.makedirs(CONTAINER_DATA_DIR, exist_ok=True)
             shutil.move(undistort_dir, os.path.join(CONTAINER_DATA_DIR, "input"))
 
-            utils.docker.run_docker_compose(CONTAINER_CONF_DIR)
+            utils.docker.run_stage(RUNTIME_STAGE)
 
             # move gaussian-splatting results
             gaussian_splatting_dir = os.path.join(temp_dir, "gaussian-splatting")

@@ -12,7 +12,7 @@ import utils.docker
 import utils.task
 
 
-CONTAINER_CONF_DIR = "deps/grounded-sam-2"
+RUNTIME_STAGE = "grounded-sam-2"
 CONTAINER_DATA_DIR = "/tmp/grounded-sam-2"
 
 
@@ -79,7 +79,7 @@ class SegmentationTask(luigi.Task):
             shutil.move(os.path.join(undistort_dir, "images"), os.path.join(CONTAINER_DATA_DIR, "images"))
 
             os.environ["TEXT_PROMPT"] = ".".join(self.seg_classes)
-            utils.docker.run_docker_compose(CONTAINER_CONF_DIR)
+            utils.docker.run_stage(RUNTIME_STAGE)
 
             # move segmentation results
             segmentation_dir = os.path.join(temp_dir, "segmentation")

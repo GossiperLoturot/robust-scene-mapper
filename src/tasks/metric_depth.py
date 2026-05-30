@@ -15,7 +15,7 @@ import utils.docker
 import utils.task
 
 
-CONTAINER_CONF_DIR = "deps/depth-anything-3"
+RUNTIME_STAGE = "depth-anything-3"
 CONTAINER_DATA_DIR = "/tmp/depth-anything-3"
 
 
@@ -80,7 +80,7 @@ class MetricDepthTask(luigi.Task):
             os.makedirs(CONTAINER_DATA_DIR, exist_ok=True)
             shutil.move(undistort_dir, os.path.join(CONTAINER_DATA_DIR, "input"))
 
-            utils.docker.run_docker_compose(CONTAINER_CONF_DIR)
+            utils.docker.run_stage(RUNTIME_STAGE)
 
             # move metric depth
             metric_depth_dir = os.path.join(temp_dir, "metric_depth")
