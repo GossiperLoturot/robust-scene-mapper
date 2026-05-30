@@ -8,6 +8,7 @@ import context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 GAUSSIAN_SPLATTING_DIR = pathlib.Path("/opt/gaussian-splatting")
+GROUNDED_SAM_MAIN_PATH = REPO_ROOT / "deps" / "grounded-sam-2" / "code" / "main.py"
 
 
 def _run_process(command: list[str], cwd: str | None = None):
@@ -45,7 +46,7 @@ def _run_grounded_sam(data_dir: str):
     with tempfile.TemporaryDirectory() as temp_dir:
         data_path = os.path.join(temp_dir, "data")
         os.symlink(data_dir, data_path)
-        _run_process(["python", str(REPO_ROOT / "deps" / "grounded-sam-2" / "code" / "main.py")], cwd=temp_dir)
+        _run_process(["python", str(GROUNDED_SAM_MAIN_PATH)], cwd=temp_dir)
 
 
 def _run_gaussian_splatting(data_dir: str):

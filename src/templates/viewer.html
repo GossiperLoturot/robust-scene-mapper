@@ -13,9 +13,9 @@
 </head>
 <body>
     <div id="ui-container">
-        <input type="checkbox" id="toggle-polygon" checked>ポリゴン表示<br>
-        <input type="checkbox" id="toggle-points" checked>点群表示<br>
-        <input type="checkbox" id="toggle-color"><select id="class-select"></select>
+        <label for="toggle-polygon"><input type="checkbox" id="toggle-polygon" checked>ポリゴン表示 (Polygon)</label><br>
+        <label for="toggle-points"><input type="checkbox" id="toggle-points" checked>点群表示 (Points)</label><br>
+        <label for="toggle-color"><input type="checkbox" id="toggle-color">クラス着色 (Class Coloring)</label><select id="class-select" aria-label="Class selection"></select>
     </div>
 
     <div id="canvas-container"></div>
@@ -95,7 +95,7 @@
         for (let i = 0; i < totalClasses; i++) {
             const option = document.createElement("option");
             option.value = i;
-            option.textContent = `クラス ${i}`;
+            option.textContent = `クラス ${i} / Class ${i}`;
             classSelect.appendChild(option);
         }
         classSelect.value = -1;

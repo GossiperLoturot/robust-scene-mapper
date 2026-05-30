@@ -11,6 +11,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VIEWER_TEMPLATE_PATH = REPO_ROOT / "src" / "templates" / "viewer.html"
+VERTICES_PER_FACE = 3
 
 
 def _load_database_path(config_path: Path) -> str:
@@ -60,7 +61,7 @@ def _load_mesh_data(finalize_db_path: Path) -> dict:
         n_class = len(classes[0])
         vertex_classes = [[0.0 for _ in range(n_class)] for _ in range(len(vertex_rows))]
         for face_index, class_vec in enumerate(classes):
-            face = indices[face_index * 3:face_index * 3 + 3]
+            face = indices[face_index * VERTICES_PER_FACE:face_index * VERTICES_PER_FACE + VERTICES_PER_FACE]
             for class_id in range(n_class):
                 score = float(class_vec[class_id])
                 vertex_classes[face[0]][class_id] += score
@@ -109,7 +110,7 @@ def _cmd_unpack(conn: sqlite3.Connection, task_id: int, output_path: Path):
 def _cmd_remove(conn: sqlite3.Connection, task_id: int):
     conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     conn.commit()
-    print("remove task.")
+    print("removed task.")
 
 
 def _cmd_view(conn: sqlite3.Connection, task_id: int, output_path: Path):
