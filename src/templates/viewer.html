@@ -102,7 +102,7 @@
 
         classSelect.addEventListener("change", (e) => {
             const classIndex = parseInt(e.target.value, 10);
-            if (classIndex == -1) return;
+            if (classIndex === -1) return;
             const values = meshData.classes.map(v => v[classIndex]);
             const colorAttribute = geometry.getAttribute("color");
             for (let i = 0; i < values.length; i++) {
