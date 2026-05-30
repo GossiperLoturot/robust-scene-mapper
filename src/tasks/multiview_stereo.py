@@ -1,5 +1,4 @@
 import os
-import shutil
 import tempfile
 
 import luigi
@@ -8,12 +7,7 @@ import pycolmap
 import context
 import tasks.reconstruction
 import tasks.video_sampling
-import utils.docker
 import utils.task
-
-
-CONTAINER_CONF_DIR = "deps/colmap-cuda"
-CONTAINER_DATA_DIR = "/tmp/colmap-cuda"
 
 
 class MultiviewStereoTask(luigi.Task):
@@ -68,24 +62,17 @@ class MultiviewStereoTask(luigi.Task):
                 f.extractall(temp_dir)
             model_dir = os.path.join(temp_dir, "model")
 
-            undistort_dir = os.path.join(temp_dir, "undistort")
-            os.makedirs(undistort_dir, exist_ok=True)
-            pycolmap.undistort_images(undistort_dir, model_dir, image_dir)
+            workspace_dir = os.path.join(temp_dir, "dense")
+            os.makedirs(workspace_dir, exist_ok=True)
+            pycolmap.undistort_images(workspace_dir, model_dir, image_dir)
 
-            # prepare container data dir
-            shutil.rmtree(CONTAINER_DATA_DIR, ignore_errors=True)
-            shutil.move(undistort_dir, CONTAINER_DATA_DIR)
-
-            utils.docker.run_docker_compose(CONTAINER_CONF_DIR)
-
-            # move dense results
-            dense_dir = os.path.join(temp_dir, "dense")
-            shutil.move(CONTAINER_DATA_DIR, dense_dir)
-
-            # clean up container data
-            shutil.rmtree(CONTAINER_DATA_DIR, ignore_errors=True)
+            pycolmap.patch_match_stereo(workspace_dir)
+            fused_path = os.path.join(workspace_dir, "fused.ply")
+            pycolmap.stereo_fusion(fused_path, workspace_dir, output_type="ply")
+            meshed_path = os.path.join(workspace_dir, "meshed-poisson.ply")
+            pycolmap.poisson_meshing(fused_path, meshed_path)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
             with output.open_upload() as f:
-                f.add(dense_dir, "dense")
+                f.add(workspace_dir, "dense")

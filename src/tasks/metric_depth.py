@@ -71,6 +71,8 @@ class MetricDepthTask(luigi.Task):
                 f.extractall(temp_dir)
             model_dir = os.path.join(temp_dir, "model")
 
+            raise Exception()
+
             undistort_dir = os.path.join(temp_dir, "undistort")
             os.makedirs(undistort_dir, exist_ok=True)
             pycolmap.undistort_images(undistort_dir, model_dir, image_dir)

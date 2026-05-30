@@ -49,7 +49,7 @@ class ObjectMaskingTask(luigi.Task):
                 image_path = os.path.join(image_dir, filename)
                 image_paths.append(image_path)
 
-            model = ultralytics.YOLO("yolo11n-seg.pt")
+            model = ultralytics.YOLO(".cache/yolo11n-seg.pt")
             results = model(image_paths, classes=self.mask_classes, conf=0.5, verbose=False)
             for result, image_path in zip(results, image_paths):
                 mask = np.full(result.orig_shape, 255, np.uint8)

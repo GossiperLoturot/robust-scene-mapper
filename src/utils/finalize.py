@@ -6,11 +6,11 @@ import subprocess
 
 import cv2
 import numpy as np
-import pycocotools.mask
 import pycolmap
 import trimesh
 
 import utils.metric_depth
+import utils.segmentation
 
 
 CREATE_SCALE_TABLE = """CREATE TABLE IF NOT EXISTS scale (
@@ -77,7 +77,7 @@ def finalize(conn: sqlite3.Connection, scale_path: str, segmentation_dir: str, d
     # create tables
     conn.executescript(CREATE_ALL)
 
-    # write metric depth scale
+    # read metric depth scale
     with open(scale_path, "rb") as f:
         scale = pickle.load(f)
     assert isinstance(scale, utils.metric_depth.MetricDepthScale)
@@ -106,6 +106,7 @@ def finalize(conn: sqlite3.Connection, scale_path: str, segmentation_dir: str, d
         # read image data
         image_path = os.path.join(dense_dir, "images", image.name)
         image_data = cv2.imread(image_path)
+        assert isinstance(image_data, np.ndarray)
         _, blob = cv2.imencode(".png", image_data)
 
         # write images table
@@ -118,24 +119,23 @@ def finalize(conn: sqlite3.Connection, scale_path: str, segmentation_dir: str, d
 
         # read segmentations
         basename, _ = os.path.splitext(image.name)
-        segmentation_path = os.path.join(segmentation_dir, basename + ".json")
-        with open(segmentation_path, "r") as f:
-            segmentation_data = json.load(f)
+        segmentation_path = os.path.join(segmentation_dir, basename + ".pkl")
+        with open(segmentation_path, "rb") as f:
+            segmentation_result = pickle.load(f)
+        assert isinstance(segmentation_result, utils.segmentation.SegmentationResult)
 
         # write segmentations
-        annotations = segmentation_data["annotations"]
-        for annotation in annotations:
+        for annotation in segmentation_result.annotations:
             # read class name
-            class_name = annotation["class_name"]
+            class_name = annotation.class_name
             # read class confidence
-            confidence = annotation["confidence"]
+            confidence = annotation.confidence
             # read mask data
-            segmentation = pycocotools.mask.decode(annotation["segmentation"])
-            _, blob = cv2.imencode(".png", segmentation * 255)
+            mask_blob = annotation.mask_blob
 
             conn.execute(
                 "INSERT INTO segmentations (image_id, class_name, confidence, mask) VALUES (?, ?, ?, ?)",
-                (id, class_name, confidence, blob.tobytes())
+                (id, class_name, confidence, mask_blob)
             )
 
     # write sparse points

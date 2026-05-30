@@ -14,5 +14,4 @@ wheels/
 # Data
 /tasks.db
 /inputs/
-*.pt
-.env
+.cache

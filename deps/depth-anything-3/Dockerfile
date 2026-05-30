@@ -1,4 +1,4 @@
-# Dockerfile for flowmap and zoedepth with CUDA 12.8
+# Dockerfile for depth-anything-3 with CUDA 12.8
 
 FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
 

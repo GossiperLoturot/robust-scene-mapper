@@ -98,7 +98,7 @@ def incremental_reconstruction(
             largest_model_id = id
     assert largest_model_id is not None
 
-    if max_num_images < 30:
+    if max_num_images < 20:
         raise Exception("reconstruction succeeded, but register image is too small!")
 
     # write and clean up

@@ -1,5 +1,4 @@
 import os
-import shutil
 import tempfile
 
 import luigi
@@ -8,12 +7,8 @@ import pycolmap
 import context
 import tasks.reconstruction
 import tasks.video_sampling
-import utils.docker
 import utils.task
-
-
-CONTAINER_CONF_DIR = "deps/grounded-sam-2"
-CONTAINER_DATA_DIR = "/tmp/grounded-sam-2"
+import utils.segmentation
 
 
 class SegmentationTask(luigi.Task):
@@ -72,22 +67,12 @@ class SegmentationTask(luigi.Task):
             undistort_dir = os.path.join(temp_dir, "undistort")
             os.makedirs(undistort_dir, exist_ok=True)
             pycolmap.undistort_images(undistort_dir, model_dir, image_dir)
+            undistort_image_dir = os.path.join(undistort_dir, "images")
 
-            # prepare container data dir
-            shutil.rmtree(CONTAINER_DATA_DIR, ignore_errors=True)
-            os.makedirs(CONTAINER_DATA_DIR, exist_ok=True)
-            shutil.move(os.path.join(undistort_dir, "images"), os.path.join(CONTAINER_DATA_DIR, "images"))
-
-            os.environ["TEXT_PROMPT"] = ".".join(self.seg_classes)
-            utils.docker.run_docker_compose(CONTAINER_CONF_DIR)
-
-            # move segmentation results
             segmentation_dir = os.path.join(temp_dir, "segmentation")
-            shutil.rmtree(segmentation_dir, ignore_errors=True)
-            shutil.move(os.path.join(CONTAINER_DATA_DIR, "masks"), segmentation_dir)
+            os.makedirs(segmentation_dir, exist_ok=True)
 
-            # clean up container data
-            shutil.rmtree(CONTAINER_DATA_DIR, ignore_errors=True)
+            utils.segmentation.segmentation(undistort_image_dir, segmentation_dir, self.seg_classes)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
