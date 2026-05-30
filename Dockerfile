@@ -2,13 +2,12 @@ FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6"
-ENV PATH="/root/.local/bin:${PATH}"
+ENV PATH="/root/.cargo/bin:${PATH}"
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    cargo \
     cmake \
     curl \
     git \
@@ -41,24 +40,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+RUN pip install uv
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 
 WORKDIR /workspace
 
 COPY pyproject.toml uv.lock /workspace/
 RUN uv sync --frozen
 
-COPY deps/cubic-segmentation /workspace/deps/cubic-segmentation
-COPY deps/viewer /workspace/deps/viewer
-RUN cd deps/cubic-segmentation && cargo build --release
-RUN cd deps/viewer && cargo build --release
-
 RUN git clone https://github.com/colmap/colmap.git /opt/colmap --recursive \
     && cd /opt/colmap \
     && git checkout 4.0.4 \
     && mkdir build \
     && cd build \
-    && cmake .. -GNinja -DBLA_VENDOR=Intel10_64lp \
+    && cmake .. -GNinja \
     && ninja \
     && ninja install
 
