@@ -13,7 +13,7 @@ dev-build:
 
 dev-check:
 	@echo "running ruff check"
-	@$(CONTAINER_EXEC) ruff check
+	@$(CONTAINER_EXEC) python -m ruff check
 
 run:
 	@echo "running application"

@@ -40,13 +40,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install uv
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 
 WORKDIR /workspace
 
-COPY pyproject.toml uv.lock /workspace/
-RUN uv sync --frozen
+RUN pip install ruff \
+    "kornia>=0.8.1" \
+    "luigi>=3.8.1" \
+    "numpy>=2.2.6" \
+    "opencv-python>=4.12.0.88" \
+    "pycocotools>=2.0.11" \
+    "pycolmap>=4.0.4" \
+    "pyyaml>=6.0.2" \
+    "rich>=15.0.0" \
+    "scipy>=1.16.1" \
+    "torch>=2.8.0" \
+    "trimesh>=4.12.2" \
+    "ultralytics>=8.3.145"
 
 RUN git clone https://github.com/colmap/colmap.git /opt/colmap --recursive \
     && cd /opt/colmap \
@@ -60,13 +70,12 @@ RUN git clone https://github.com/colmap/colmap.git /opt/colmap --recursive \
 RUN git clone https://github.com/ByteDance-Seed/depth-anything-3 /opt/depth-anything-3 --recursive \
     && cd /opt/depth-anything-3 \
     && git checkout 41736238f5bced4debf3f2a12375d2466874866d \
-    && /workspace/.venv/bin/pip install -e .
+    && pip install -e .
 
-RUN /workspace/.venv/bin/pip install \
+RUN pip install \
     "transformers" \
     "accelerate" \
-    "supervision" \
-    "pycocotools"
+    "supervision"
 
 RUN python -c "import transformers; model_id='IDEA-Research/grounding-dino-base'; transformers.AutoProcessor.from_pretrained(model_id, device_map='auto'); transformers.AutoModelForZeroShotObjectDetection.from_pretrained(model_id, device_map='auto')"
 RUN python -c "import transformers; model_id='facebook/sam2.1-hiera-large'; transformers.Sam2Processor.from_pretrained(model_id, device_map='auto'); transformers.Sam2Model.from_pretrained(model_id, device_map='auto')"
@@ -75,7 +84,7 @@ RUN git clone https://github.com/yzslab/gaussian-splatting-lightning /opt/gaussi
     && cd /opt/gaussian-splatting \
     && git checkout ee022aa8298c8082328a17ce8cae1b6f0360271d
 
-RUN cd /opt/gaussian-splatting && /workspace/.venv/bin/pip install \
+RUN cd /opt/gaussian-splatting && pip install \
     "lightning[pytorch-extra]==2.3.*" \
     "pytorch-lightning==2.3.*" \
     "bitsandbytes==0.45.*" \
@@ -91,22 +100,22 @@ RUN cd /opt/gaussian-splatting && /workspace/.venv/bin/pip install \
     "torchmetrics==1.7.3"
 
 RUN cd /opt/gaussian-splatting \
-    && /workspace/.venv/bin/pip uninstall -y gsplat \
+    && pip uninstall -y gsplat \
     && git clone https://github.com/graphdeco-inria/diff-gaussian-rasterization.git submodules/diff-gaussian-rasterization --recursive \
     && cd submodules/diff-gaussian-rasterization \
     && git checkout 59f5f77e3ddbac3ed9db93ec2cfe99ed6c5d121d \
-    && /workspace/.venv/bin/pip install -e . \
+    && pip install -e . \
     && cd /opt/gaussian-splatting \
     && git clone https://github.com/yzslab/simple-knn.git submodules/simple-knn --recursive \
     && cd submodules/simple-knn \
     && git checkout 44f764299fa305faf6ec5ebd99939e0508331503 \
     && sed -i "1s/^/#include <cfloat>\n/" simple_knn.cu \
-    && /workspace/.venv/bin/pip install -e . \
+    && pip install -e . \
     && cd /opt/gaussian-splatting \
     && git clone https://github.com/yzslab/gsplat.git submodules/gsplat --recursive \
     && cd submodules/gsplat \
     && git checkout fbe426302e47936e04e2bb404a156e4d1530d0e0 \
-    && /workspace/.venv/bin/pip install -e .
+    && pip install -e .
 
 RUN cd /opt/gaussian-splatting \
     && git clone https://github.com/DepthAnything/Depth-Anything-V2 utils/Depth-Anything-V2 \
