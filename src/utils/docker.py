@@ -51,6 +51,14 @@ def _run_grounded_sam(data_dir: str):
 def _run_gaussian_splatting(data_dir: str):
     output_dir = os.path.join(data_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
+    checkpoint_path = GAUSSIAN_SPLATTING_DIR / "utils" / "Depth-Anything-V2" / "checkpoints" / "depth_anything_v2_vitl.pth"
+    if not checkpoint_path.exists():
+        _run_process([
+            "wget",
+            "-O",
+            str(checkpoint_path),
+            "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth?download=true",
+        ])
     _run_process(["ln", "-sfn", data_dir, str(GAUSSIAN_SPLATTING_DIR / "data")])
     _run_process(["ln", "-sfn", output_dir, str(GAUSSIAN_SPLATTING_DIR / "outputs")])
     _run_process(["python", "utils/estimate_dataset_depths.py", "data/input"], cwd=str(GAUSSIAN_SPLATTING_DIR))

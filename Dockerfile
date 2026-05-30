@@ -77,9 +77,6 @@ RUN pip install \
     "accelerate" \
     "supervision"
 
-RUN python -c "import transformers; model_id='IDEA-Research/grounding-dino-base'; transformers.AutoProcessor.from_pretrained(model_id, device_map='auto'); transformers.AutoModelForZeroShotObjectDetection.from_pretrained(model_id, device_map='auto')"
-RUN python -c "import transformers; model_id='facebook/sam2.1-hiera-large'; transformers.Sam2Processor.from_pretrained(model_id, device_map='auto'); transformers.Sam2Model.from_pretrained(model_id, device_map='auto')"
-
 RUN git clone https://github.com/yzslab/gaussian-splatting-lightning /opt/gaussian-splatting --recursive \
     && cd /opt/gaussian-splatting \
     && git checkout ee022aa8298c8082328a17ce8cae1b6f0360271d
@@ -121,8 +118,7 @@ RUN cd /opt/gaussian-splatting \
     && git clone https://github.com/DepthAnything/Depth-Anything-V2 utils/Depth-Anything-V2 \
     && cd utils/Depth-Anything-V2 \
     && git checkout a561b849ebae10a6f5ef49e26c83cbbcd36c71bf \
-    && mkdir checkpoints \
-    && wget -O checkpoints/depth_anything_v2_vitl.pth "https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth?download=true"
+    && mkdir checkpoints
 
 COPY . /workspace
 
