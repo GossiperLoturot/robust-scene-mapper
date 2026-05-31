@@ -1,4 +1,5 @@
 import os
+import shutil
 import sqlite3
 import tempfile
 
@@ -10,9 +11,6 @@ import tasks.multiview_stereo
 import tasks.segmentation
 import utils.finalize
 import utils.task
-
-
-BIN_PARENT_DIR = "deps/cubic-segmentation"
 
 
 class FinalizeTask(luigi.Task):
@@ -74,22 +72,15 @@ class FinalizeTask(luigi.Task):
 
     def output(self):
         ctx = context.Context()
-        return [utils.task.DbTarget(ctx.database, self)]
+        return [utils.task.FsTarget(ctx.database_dir, self)]
 
     def run(self):
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[metric_depth], [segmentation], [multiview_stereo]] = self.input()
-            with metric_depth.open_download() as f:
-                f.extractall(temp_dir)
-            scale_path = os.path.join(temp_dir, "scale.bin")
-            with segmentation.open_download() as f:
-                f.extractall(temp_dir)
-            segmentation_dir = os.path.join(temp_dir, "segmentation")
-            with multiview_stereo.open_download() as f:
-                f.extractall(temp_dir)
-            dense_dir = os.path.join(temp_dir, "dense")
-            ctx.logger.info("extracted all inputs")
+            scale_path = os.path.join(metric_depth.read(), "scale.bin")
+            segmentation_dir = os.path.join(segmentation.read(), "segmentation")
+            dense_dir = os.path.join(multiview_stereo.read(), "dense")
 
             db_path = os.path.join(temp_dir, "finalize.db")
             with sqlite3.Connection(db_path) as conn:
@@ -97,9 +88,7 @@ class FinalizeTask(luigi.Task):
             ctx.logger.info("finalized database")
 
             ctx.logger.info("cubic-segmentation")
-            utils.finalize.run_cubic_segmentation(BIN_PARENT_DIR, db_path, self.seg_classes)
+            utils.finalize.run_cubic_segmentation(db_path, self.seg_classes)
 
-            ctx.logger.info("writing output to database")
             [output] = self.output()
-            with output.open_upload() as f:
-                f.add(db_path, "finalize.db")
+            shutil.move(db_path, output.open())

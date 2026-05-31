@@ -9,6 +9,7 @@ import numpy as np
 import pycolmap
 import trimesh
 
+import context
 import utils.metric_depth
 import utils.segmentation
 
@@ -158,7 +159,7 @@ def finalize(conn: sqlite3.Connection, scale_path: str, segmentation_dir: str, d
     conn.executemany("INSERT INTO dense_points VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
 
     # write triangle mesh (verts and faces)
-    mesh_path = os.path.join(dense_dir, "meshed-delaunay.ply")
+    mesh_path = os.path.join(dense_dir, "meshed-poisson.ply")
     mesh = trimesh.load_scene(mesh_path).to_geometry()
     assert isinstance(mesh, trimesh.Trimesh)
     verts = mesh.vertices.astype(np.float32)
@@ -169,11 +170,16 @@ def finalize(conn: sqlite3.Connection, scale_path: str, segmentation_dir: str, d
     conn.executemany("INSERT INTO faces VALUES (?, ?, ?, ?)", rows)
 
 
-def run_cubic_segmentation(bin_parent_dir: str, db_path: str, seg_classes: list[str]):
+def run_cubic_segmentation(db_path: str, seg_classes: list[str]):
+    ctx = context.Context()
+
     prompt = ".".join(seg_classes)
-    with subprocess.Popen(["./cubic-segmentation", "raycast", db_path, prompt], cwd=bin_parent_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as proc:
+    with subprocess.Popen(
+        ["./cubic-segmentation", "raycast", db_path, prompt], cwd="deps/cubic-segmentation",
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    ) as proc:
         if proc.stdout:
             for line in proc.stdout:
-                print(line, end="", flush=True)
+                ctx.console.print(line, end="")
         if proc.wait() != 0:
-            raise RuntimeError(f"failed to run cubic-segmentation. bin parent_dir: {bin_parent_dir}, database: {db_path}, prompt: {prompt}")
+            raise RuntimeError(f"failed to run cubic-segmentation. database: {db_path}, prompt: {prompt}")

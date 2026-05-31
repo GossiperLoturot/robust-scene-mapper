@@ -1,57 +1,35 @@
-import contextlib
-import io
+import os
+import hashlib
 import json
-import sqlite3
-import tarfile
 
 import luigi
 
 
-class DbTarget(luigi.Target):
-    db: sqlite3.Connection
-    task: luigi.Task
+class FsTarget(luigi.Target):
+    database_dir: str
+    basename: str
 
-    def __init__(self, database: str, task: luigi.Task):
-        self.db = sqlite3.connect(database)
-        self.task = task
+    def __init__(self, database_dir: str, task: luigi.Task):
+        self.database_dir = database_dir
 
-        self.db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tasks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                task_name TEXT NOT NULL,
-                params_json TEXT NOT NULL,
-                artifact BLOB NOT NULL,
-                UNIQUE(task_name, params_json))
-            """)
-        self.db.commit()
+        task_name = task.__class__.__name__
+        params_json = json.dumps(task.param_kwargs, sort_keys=True)
+        hexdigest = hashlib.md5(params_json.encode()).hexdigest()
+        basename = f"{task_name}_{hexdigest}"
+
+        self.database_dir = database_dir
+        self.basename = basename
 
     def exists(self) -> bool:
-        task_name = self.task.__class__.__name__
-        params_json = json.dumps(self.task.param_kwargs, sort_keys=True)
-        row = self.db.execute("SELECT 1 FROM tasks WHERE task_name = ? AND params_json = ?", (task_name, params_json)).fetchone()
-        return row is not None
+        target_dir = os.path.join(self.database_dir, self.basename)
+        return os.path.exists(target_dir)
 
-    @contextlib.contextmanager
-    def open_upload(self):
-        obj = io.BytesIO()
-        with tarfile.open(fileobj=obj, mode="w:gz") as tar:
-            yield tar
-        obj.seek(0)
+    def open(self) -> str:
+        target_dir = os.path.join(self.database_dir, self.basename)
+        os.makedirs(target_dir, exist_ok=True)
+        return target_dir
 
-        task_name = self.task.__class__.__name__
-        params_json = json.dumps(self.task.param_kwargs, sort_keys=True)
-        artifact = obj.getvalue()
-        self.db.execute("INSERT INTO tasks (task_name, params_json, artifact) VALUES (?, ?, ?)", (task_name, params_json, artifact))
-        self.db.commit()
-
-    @contextlib.contextmanager
-    def open_download(self):
-        task_name = self.task.__class__.__name__
-        params_json = json.dumps(self.task.param_kwargs, sort_keys=True)
-        artifact, = self.db.execute("SELECT artifact FROM tasks WHERE task_name = ? AND params_json = ?", (task_name, params_json)).fetchone()
-        assert isinstance(artifact, bytes)
-
-        obj = io.BytesIO(artifact)
-        with tarfile.open(fileobj=obj, mode="r:gz") as tar:
-            yield tar
+    def read(self) -> str:
+        target_dir = os.path.join(self.database_dir, self.basename)
+        assert os.path.exists(target_dir), f"target does not exist: {target_dir}"
+        return target_dir

@@ -57,7 +57,7 @@ if __name__ == "__main__":
     ctx.logger.info(f"load config.yaml: {config}")
 
     # set database from config
-    ctx.database = config["global"]["database"]
+    ctx.database_dir = config["global"]["database_dir"]
 
     try:
         task = DispatchTask(**config["dispatch"])

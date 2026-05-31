@@ -1,5 +1,5 @@
 global:
-  database: "tasks.db"
+  database_dir: "tasks"
 
 dispatch:
   input_dir: "inputs"

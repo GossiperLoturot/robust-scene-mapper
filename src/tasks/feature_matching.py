@@ -1,5 +1,6 @@
 import os
 import pickle
+import shutil
 import tempfile
 
 import luigi
@@ -41,18 +42,14 @@ class FeatureMatchingTask(luigi.Task):
 
     def output(self):
         ctx = context.Context()
-        return [utils.task.DbTarget(ctx.database, self)]
+        return [utils.task.FsTarget(ctx.database_dir, self)]
 
     def run(self):
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[video_sampling], [object_masking]] = self.input()
-            with video_sampling.open_download() as f:
-                f.extractall(temp_dir)
-            image_dir = os.path.join(temp_dir, "images")
-            with object_masking.open_download() as f:
-                f.extractall(temp_dir)
-            mask_dir = os.path.join(temp_dir, "masks")
+            image_dir = os.path.join(video_sampling.read(), "images")
+            mask_dir = os.path.join(object_masking.read(), "masks")
 
             image_masks = utils.feature_matching.load_image_masks(image_dir, mask_dir)
             matching_pairs = utils.feature_matching.generate_matching_pairs(len(image_masks))
@@ -79,6 +76,5 @@ class FeatureMatchingTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            with output.open_upload() as f:
-                f.add(matching_result_path, "matching_result.bin")
-                f.add(camera_mapping_path, "camera_mapping.bin")
+            shutil.move(matching_result_path, output.open())
+            shutil.move(camera_mapping_path, output.open())

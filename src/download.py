@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 
 os.environ["ULTRALYTICS_HOME"] = ".cache/ultralytics"
 os.environ["TORCH_HOME"] = ".cache/torch"
@@ -33,13 +34,24 @@ def main():
     logger.info("download LightGlue weights")
     kornia.feature.LightGlueMatcher("disk")
 
-    logger.info("download grounding dino weights")
+    logger.info("download Grounding Dino weights")
     transformers.AutoProcessor.from_pretrained("IDEA-Research/grounding-dino-base")
     transformers.AutoModelForZeroShotObjectDetection.from_pretrained("IDEA-Research/grounding-dino-base")
 
-    logger.info("download sam2 weights")
+    logger.info("download SAM2 weights")
     transformers.Sam2Processor.from_pretrained("facebook/sam2.1-hiera-large")
     transformers.Sam2Model.from_pretrained("facebook/sam2.1-hiera-large")
+
+    logger.info("download Depth Anything 3 weights")
+    with subprocess.Popen(
+        ["uv", "run", "hf", "download", "depth-anything/DA3NESTED-GIANT-LARGE-1.1"], cwd="deps/depth-anything-3",
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    ) as proc:
+        if proc.stdout:
+            for line in proc.stdout:
+                console.print(line, end="")
+        if proc.wait() != 0:
+            raise RuntimeError("failed to download Depth Anything 3 weights")
 
     logger.info("successfully downloaded all weights")
 

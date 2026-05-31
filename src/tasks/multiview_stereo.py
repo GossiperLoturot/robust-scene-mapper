@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 
 import luigi
@@ -49,18 +50,14 @@ class MultiviewStereoTask(luigi.Task):
 
     def output(self):
         ctx = context.Context()
-        return [utils.task.DbTarget(ctx.database, self)]
+        return [utils.task.FsTarget(ctx.database_dir, self)]
 
     def run(self):
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[video_sampling], [reconstruction]] = self.input()
-            with video_sampling.open_download() as f:
-                f.extractall(temp_dir)
-            image_dir = os.path.join(temp_dir, "images")
-            with reconstruction.open_download() as f:
-                f.extractall(temp_dir)
-            model_dir = os.path.join(temp_dir, "model")
+            image_dir = os.path.join(video_sampling.read(), "images")
+            model_dir = os.path.join(reconstruction.read(), "model")
 
             workspace_dir = os.path.join(temp_dir, "dense")
             os.makedirs(workspace_dir, exist_ok=True)
@@ -74,5 +71,4 @@ class MultiviewStereoTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            with output.open_upload() as f:
-                f.add(workspace_dir, "dense")
+            shutil.move(workspace_dir, output.open())

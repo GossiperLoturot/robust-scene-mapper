@@ -1,4 +1,5 @@
 import dataclasses
+import gc
 import math
 import os
 
@@ -88,47 +89,54 @@ def extract_feature_and_match(
     depth_confidence: float,
     width_confidence: float,
 ) -> FeatureMatchingResult:
-    device = kornia.core.utils.get_cuda_or_mps_device_if_available()
+    def impl():
+        device = kornia.core.utils.get_cuda_or_mps_device_if_available()
 
-    image_paths = dict[int, str]()
-    image_sizes = dict[int, tuple[int, int]]()
-    keypoints_dict = dict[int, np.ndarray]()
-    descriptors_dict = dict[int, torch.Tensor]()
-    lafs_dict = dict[int, torch.Tensor]()  # local affin frame
-    matches_dict = dict[tuple[int, int], np.ndarray]()
+        image_paths = dict[int, str]()
+        image_sizes = dict[int, tuple[int, int]]()
+        keypoints_dict = dict[int, np.ndarray]()
+        descriptors_dict = dict[int, torch.Tensor]()
+        lafs_dict = dict[int, torch.Tensor]()  # local affin frame
+        matches_dict = dict[tuple[int, int], np.ndarray]()
 
-    model_disk = kornia.feature.DISK.from_pretrained("depth").to(device).eval()
-    model_lg = kornia.feature.LightGlueMatcher("disk", { "depth_confidence": depth_confidence, "width_confidence": width_confidence }).to(device).eval()
-    for i in matching_pairs.image_indices:
-        image_mask = image_masks[i]
+        model_disk = kornia.feature.DISK.from_pretrained("depth").to(device).eval()
+        for i in matching_pairs.image_indices:
+            image_mask = image_masks[i]
 
-        image_path = image_mask.image_path
-        image = image_mask.image
-        # mask_path = image_mask.mask_path
-        mask = image_mask.mask
+            image_path = image_mask.image_path
+            image = image_mask.image
+            # mask_path = image_mask.mask_path
+            mask = image_mask.mask
 
-        features = model_disk(image, max_keypoints, pad_if_not_divisible=True)[0]
-        keypoints = features.keypoints[None, ...]
-        descriptors = features.descriptors[None, ...]
-        lafs = kornia.feature.laf_from_center_scale_ori(keypoints)
+            features = model_disk(image, max_keypoints, pad_if_not_divisible=True)[0]
+            keypoints = features.keypoints[None, ...]
+            descriptors = features.descriptors[None, ...]
+            lafs = kornia.feature.laf_from_center_scale_ori(keypoints)
 
-        height, width = image.size(2), image.size(3)
-        x, y = keypoints[:, :, 0], keypoints[:, :, 1]
+            height, width = image.size(2), image.size(3)
+            x, y = keypoints[:, :, 0], keypoints[:, :, 1]
 
-        # マスク領域および画像範囲内の特徴点のみをフィルタリング
-        valid_mask = (0 < mask[0, 0, y.int(), x.int()]) & (0 <= x) & (x <= width) & (0 <= y) & (y <= height)
+            # マスク領域および画像範囲内の特徴点のみをフィルタリング
+            valid_mask = (0 < mask[0, 0, y.int(), x.int()]) & (0 <= x) & (x <= width) & (0 <= y) & (y <= height)
 
-        image_paths[i] = image_path
-        image_sizes[i] = (height, width)
-        keypoints_dict[i] = keypoints[valid_mask].detach().cpu().numpy().astype(np.float32)
-        descriptors_dict[i] = descriptors[valid_mask]
-        lafs_dict[i] = lafs[valid_mask]
+            image_paths[i] = image_path
+            image_sizes[i] = (height, width)
+            keypoints_dict[i] = keypoints[valid_mask].detach().cpu().numpy().astype(np.float32)
+            descriptors_dict[i] = descriptors[valid_mask].detach().clone()
+            lafs_dict[i] = lafs[valid_mask].detach().clone()
 
-    for i, j in matching_pairs.pair_indices:
-        _, matches = model_lg(descriptors_dict[i], descriptors_dict[j], lafs_dict[i][None, ...], lafs_dict[j][None, ...], hw1=image_sizes[i], hw2=image_sizes[j])
-        matches_dict[(i, j)] = matches.detach().cpu().numpy().astype(np.int32)
+        model_lg = kornia.feature.LightGlueMatcher("disk", { "depth_confidence": depth_confidence, "width_confidence": width_confidence }).to(device).eval()
+        for i, j in matching_pairs.pair_indices:
+            _, matches = model_lg(descriptors_dict[i], descriptors_dict[j], lafs_dict[i][None, ...], lafs_dict[j][None, ...], hw1=image_sizes[i], hw2=image_sizes[j])
+            matches_dict[(i, j)] = matches.detach().cpu().numpy().astype(np.int32)
 
-    return FeatureMatchingResult(image_paths=image_paths, keypoints_dict=keypoints_dict, matches_dict=matches_dict)
+        return FeatureMatchingResult(image_paths=image_paths, keypoints_dict=keypoints_dict, matches_dict=matches_dict)
+
+    result = impl()
+
+    gc.collect()
+    torch.cuda.empty_cache()
+    return result
 
 
 def create_camera_mapping(image_masks: list[ImageMask]) -> CameraMapping:

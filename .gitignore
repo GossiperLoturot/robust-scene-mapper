@@ -12,6 +12,6 @@ wheels/
 .venv/
 
 # Data
-/tasks.db
+/tasks/
 /inputs/
 .cache

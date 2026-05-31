@@ -1,5 +1,6 @@
 import os
 import pickle
+import shutil
 import tempfile
 
 import luigi
@@ -46,19 +47,15 @@ class ReconstructionTask(luigi.Task):
 
     def output(self):
         ctx = context.Context()
-        return [utils.task.DbTarget(ctx.database, self)]
+        return [utils.task.FsTarget(ctx.database_dir, self)]
 
     def run(self):
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[video_sampling], [feature_matching]] = self.input()
-            with video_sampling.open_download() as f:
-                f.extractall(temp_dir)
-            image_dir = os.path.join(temp_dir, "images")
-            with feature_matching.open_download() as f:
-                f.extractall(temp_dir)
-            matching_result_path = os.path.join(temp_dir, "matching_result.bin")
-            camera_mapping_path = os.path.join(temp_dir, "camera_mapping.bin")
+            image_dir = os.path.join(video_sampling.read(), "images")
+            matching_result_path = os.path.join(feature_matching.read(), "matching_result.bin")
+            camera_mapping_path = os.path.join(feature_matching.read(), "camera_mapping.bin")
 
             # load correspondence
             with open(matching_result_path, "rb") as f:
@@ -102,5 +99,4 @@ class ReconstructionTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            with output.open_upload() as f:
-                f.add(single_model_dir, "model")
+            shutil.move(single_model_dir, output.open())

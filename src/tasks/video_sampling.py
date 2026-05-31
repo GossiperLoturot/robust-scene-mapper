@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 
 import luigi
@@ -16,7 +17,7 @@ class VideoSamplingTask(luigi.Task):
 
     def output(self):
         ctx = context.Context()
-        return [utils.task.DbTarget(ctx.database, self)]
+        return [utils.task.FsTarget(ctx.database_dir, self)]
 
     def run(self):
         ctx = context.Context()
@@ -53,5 +54,4 @@ class VideoSamplingTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            with output.open_upload() as f:
-                f.add(image_dir, "images")
+            shutil.move(image_dir, output.open())

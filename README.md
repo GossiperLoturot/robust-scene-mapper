@@ -30,7 +30,6 @@ Ensure you have the following tools installed on your host system:
 * GNU Make
 * uv (Python package manager)
 * Cargo (Rust package manager)
-* Docker Engine (with NVIDIA Container Toolkit for CUDA acceleration)
 
 ## Quick Start
 
@@ -58,5 +57,7 @@ vi config.yaml
 Execute the full pipeline using the provided Makefile:
 
 ```bash
+make build  # install python packages on project. needs Cargo.
+make download  # download model weights.
 make run
 ```

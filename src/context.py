@@ -11,7 +11,7 @@ class Context:
     handler: rich.logging.RichHandler
     logger: logging.Logger
 
-    database: str
+    database_dir: str
 
     def __new__(cls):
         if cls._singleton is None:
@@ -29,4 +29,4 @@ class Context:
         self.logger.setLevel(logging.INFO)
         self.logger.addHandler(self.handler)
 
-        self.database = "database.db"
+        self.database_dir = "tasks"

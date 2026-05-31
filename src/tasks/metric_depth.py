@@ -1,6 +1,7 @@
 import os
 import pickle
 import shutil
+import subprocess
 import tempfile
 
 import luigi
@@ -11,12 +12,7 @@ import context
 import tasks.reconstruction
 import tasks.video_sampling
 import utils.metric_depth
-import utils.docker
 import utils.task
-
-
-CONTAINER_CONF_DIR = "deps/depth-anything-3"
-CONTAINER_DATA_DIR = "/tmp/depth-anything-3"
 
 
 class MetricDepthTask(luigi.Task):
@@ -58,39 +54,36 @@ class MetricDepthTask(luigi.Task):
 
     def output(self):
         ctx = context.Context()
-        return [utils.task.DbTarget(ctx.database, self)]
+        return [utils.task.FsTarget(ctx.database_dir, self)]
 
     def run(self):
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[video_sampling], [reconstruction]] = self.input()
-            with video_sampling.open_download() as f:
-                f.extractall(temp_dir)
-            image_dir = os.path.join(temp_dir, "images")
-            with reconstruction.open_download() as f:
-                f.extractall(temp_dir)
-            model_dir = os.path.join(temp_dir, "model")
-
-            raise Exception()
+            image_dir = os.path.join(video_sampling.read(), "images")
+            model_dir = os.path.join(reconstruction.read(), "model")
 
             undistort_dir = os.path.join(temp_dir, "undistort")
             os.makedirs(undistort_dir, exist_ok=True)
             pycolmap.undistort_images(undistort_dir, model_dir, image_dir)
 
-            # prepare container data dir
-            shutil.rmtree(CONTAINER_DATA_DIR, ignore_errors=True)
-            os.makedirs(CONTAINER_DATA_DIR, exist_ok=True)
-            shutil.move(undistort_dir, os.path.join(CONTAINER_DATA_DIR, "input"))
-
-            utils.docker.run_docker_compose(CONTAINER_CONF_DIR)
-
-            # move metric depth
             metric_depth_dir = os.path.join(temp_dir, "metric_depth")
-            shutil.rmtree(metric_depth_dir, ignore_errors=True)
-            shutil.move(os.path.join(CONTAINER_DATA_DIR, "output"), metric_depth_dir)
-
-            # clean up container data
-            shutil.rmtree(CONTAINER_DATA_DIR, ignore_errors=True)
+            ctx.logger.info("download Depth Anything 3 weights")
+            with subprocess.Popen(
+                [
+                    "uv", "run", "da3", "auto", undistort_dir,
+                    "--export-dir", metric_depth_dir,
+                    "--export-format", "mini_npz",
+                    "--process-res", "256",
+                    "--no-align-to-input-ext-scale",
+                ], cwd="deps/depth-anything-3",
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            ) as proc:
+                if proc.stdout:
+                    for line in proc.stdout:
+                        ctx.console.print(line, end="")
+                if proc.wait() != 0:
+                    raise RuntimeError("failed to estimate metric depth")
 
             # post-processing
             ctx.logger.info("post-processing metric depth")
@@ -102,5 +95,4 @@ class MetricDepthTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            with output.open_upload() as f:
-                f.add(scale_path, "scale.bin")
+            shutil.move(scale_path, output.open())

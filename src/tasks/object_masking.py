@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 
 import cv2
@@ -31,15 +32,13 @@ class ObjectMaskingTask(luigi.Task):
 
     def output(self):
         ctx = context.Context()
-        return [utils.task.DbTarget(ctx.database, self)]
+        return [utils.task.FsTarget(ctx.database_dir, self)]
 
     def run(self):
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[video_sampling]] = self.input()
-            with video_sampling.open_download() as f:
-                f.extractall(temp_dir)
-            image_dir = os.path.join(temp_dir, "images")
+            image_dir = os.path.join(video_sampling.read(), "images")
 
             mask_dir = os.path.join(temp_dir, "masks")
             os.makedirs(mask_dir, exist_ok=True)
@@ -65,5 +64,4 @@ class ObjectMaskingTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            with output.open_upload() as f:
-                f.add(mask_dir, "masks")
+            shutil.move(mask_dir, output.open())

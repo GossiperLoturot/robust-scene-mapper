@@ -1,0 +1,13 @@
+[project]
+name = "robust-scene-mapper-depth-anything-3"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "depth-anything-3",
+    "torch==2.10.0",
+]
+
+[tool.uv.sources]
+depth-anything-3 = { git = "https://github.com/bytedance-seed/depth-anything-3" }
