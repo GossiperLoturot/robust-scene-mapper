@@ -1,4 +1,4 @@
-.PHONY: dev-build dev-check run view
+.PHONY: dev-build dev-check download run view
 
 dev-build:
 	@echo "installing dependencies"
@@ -7,12 +7,14 @@ dev-build:
 	@cd deps/cubic-segmentation && cargo build --release
 	@echo "build viewer"
 	@cd deps/viewer && cargo build --release
-	@echo "check docker engine availability"
-	@docker version
 
 dev-check:
 	@echo "running ruff check"
 	@uv run ruff check
+
+download:
+	@echo "download model weights"
+	@uv run src/download.py
 
 run:
 	@echo "running application"

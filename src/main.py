@@ -1,6 +1,11 @@
 import os
 import glob
 
+os.environ["ULTRALYTICS_HOME"] = ".cache/ultralytics"
+os.environ["TORCH_HOME"] = ".cache/torch"
+os.environ["HF_HOME"] = ".cache/huggingface"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 import luigi
 import yaml
 

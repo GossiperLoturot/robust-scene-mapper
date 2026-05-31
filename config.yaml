@@ -1,8 +1,8 @@
 global:
-  database: "/mnt/d/study-2025/tasks.db"
+  database: "tasks.db"
 
 dispatch:
-  input_dir: "/mnt/d/study-2025/video-internet"
+  input_dir: "inputs"
   fps: 8
   width: 512
   height: 288

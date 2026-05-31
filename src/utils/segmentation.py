@@ -23,9 +23,6 @@ class SegmentationResult:
 
 @torch.inference_mode()
 def segmentation(image_dir: str, output_dir: str, text: list[str]):
-    # save models to cache
-    os.environ["HF_HOME"] = ".cache"
-
     model_id = "IDEA-Research/grounding-dino-base"
     gd_processor = transformers.AutoProcessor.from_pretrained(model_id)
     gd_model = transformers.AutoModelForZeroShotObjectDetection.from_pretrained(model_id, device_map="auto")
