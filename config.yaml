@@ -14,3 +14,6 @@ dispatch:
   init_frame_height: 288
   init_focal_length: 300.0
   seg_classes: ["road", "sidewalk", "white line", "road sign", "utility pole", "fence", "building", "vegetation", "tree"]
+  depth_tree_size: 10
+  point_weight: 4.0
+  trim_confidence: 0.0

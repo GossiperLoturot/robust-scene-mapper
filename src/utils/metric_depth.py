@@ -15,9 +15,9 @@ def calculate_scale(metric_depth, model: pycolmap.Reconstruction) -> MetricDepth
     metric_extrinsics = metric_depth["extrinsics"]
 
     relative_extrinsics = np.zeros_like(metric_extrinsics)
-    for image_id in range(model.num_images()):
+    for i, image_id in enumerate(model.images):
         image = model.image(image_id)
-        relative_extrinsics[image_id] = np.concat([image.cam_from_world().matrix(), [[0, 0, 0, 1]]])
+        relative_extrinsics[i] = np.concat([image.cam_from_world().matrix(), [[0, 0, 0, 1]]])
 
     metric_translate = np.linalg.inv(metric_extrinsics) @ np.array([0, 0, 0, 1])
     relative_translate = np.linalg.inv(relative_extrinsics) @ np.array([0, 0, 0, 1])

@@ -8,6 +8,7 @@ import pycolmap
 import context
 import tasks.reconstruction
 import tasks.video_sampling
+import tasks.object_masking
 import utils.task
 
 
@@ -25,6 +26,9 @@ class MultiviewStereoTask(luigi.Task):
     init_frame_width: luigi.IntParameter = luigi.IntParameter()
     init_frame_height: luigi.IntParameter = luigi.IntParameter()
     init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
+    depth_tree_size: luigi.IntParameter = luigi.IntParameter()
+    point_weight: luigi.FloatParameter = luigi.FloatParameter()
+    trim_confidence: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self):
         video_sampling = tasks.video_sampling.VideoSamplingTask(
@@ -32,6 +36,13 @@ class MultiviewStereoTask(luigi.Task):
             fps=self.fps,
             width=self.width,
             height=self.height,
+        )
+        object_masking = tasks.object_masking.ObjectMaskingTask(
+            input_path=self.input_path,
+            fps=self.fps,
+            width=self.width,
+            height=self.height,
+            mask_classes=self.mask_classes,
         )
         reconstruction = tasks.reconstruction.ReconstructionTask(
             input_path=self.input_path,
@@ -46,7 +57,7 @@ class MultiviewStereoTask(luigi.Task):
             init_frame_height=self.init_frame_height,
             init_focal_length=self.init_focal_length,
         )
-        return [video_sampling, reconstruction]
+        return [video_sampling, object_masking, reconstruction]
 
     def output(self):
         ctx = context.Context()
@@ -55,19 +66,36 @@ class MultiviewStereoTask(luigi.Task):
     def run(self):
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
-            [[video_sampling], [reconstruction]] = self.input()
+            [[video_sampling], [object_masking], [reconstruction]] = self.input()
             image_dir = os.path.join(video_sampling.read(), "images")
+            mask_dir = os.path.join(object_masking.read(), "masks")
             model_dir = os.path.join(reconstruction.read(), "model")
 
             workspace_dir = os.path.join(temp_dir, "dense")
             os.makedirs(workspace_dir, exist_ok=True)
             pycolmap.undistort_images(workspace_dir, model_dir, image_dir)
 
+            # undistort masks
+            undistort_mask_dir = os.path.join(temp_dir, "mask")
+            os.makedirs(undistort_mask_dir, exist_ok=True)
+            pycolmap.undistort_images(undistort_mask_dir, model_dir, mask_dir)
+            shutil.move(os.path.join(undistort_mask_dir, "images"), os.path.join(workspace_dir, "masks"))
+            shutil.rmtree(undistort_mask_dir, ignore_errors=True)
+
             pycolmap.patch_match_stereo(workspace_dir)
             fused_path = os.path.join(workspace_dir, "fused.ply")
-            pycolmap.stereo_fusion(fused_path, workspace_dir, output_type="ply")
+            pycolmap.stereo_fusion(
+                fused_path,
+                workspace_dir,
+                output_type="ply",
+                options=pycolmap.StereoFusionOptions(mask_path=os.path.join(workspace_dir, "masks")),
+            )
             meshed_path = os.path.join(workspace_dir, "meshed-poisson.ply")
-            pycolmap.poisson_meshing(fused_path, meshed_path)
+            pycolmap.poisson_meshing(
+                fused_path,
+                meshed_path,
+                pycolmap.PoissonMeshingOptions(depth=self.depth_tree_size, point_weight=self.point_weight, trim=self.trim_confidence),
+            )
 
             ctx.logger.info("writing output to database")
             [output] = self.output()

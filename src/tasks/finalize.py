@@ -26,6 +26,9 @@ class FinalizeTask(luigi.Task):
     init_frame_height: luigi.IntParameter = luigi.IntParameter()
     init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
     seg_classes: luigi.ListParameter = luigi.ListParameter()
+    depth_tree_size: luigi.IntParameter = luigi.IntParameter()
+    point_weight: luigi.FloatParameter = luigi.FloatParameter()
+    trim_confidence: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self):
         metric_depth = tasks.metric_depth.MetricDepthTask(
@@ -67,6 +70,9 @@ class FinalizeTask(luigi.Task):
             init_frame_width=self.init_frame_width,
             init_frame_height=self.init_frame_height,
             init_focal_length=self.init_focal_length,
+            depth_tree_size=self.depth_tree_size,
+            point_weight=self.point_weight,
+            trim_confidence=self.trim_confidence,
         )
         return [metric_depth, segmentation, multiview_stereo]
 

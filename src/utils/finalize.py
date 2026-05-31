@@ -98,10 +98,10 @@ def finalize(conn: sqlite3.Connection, scale_path: str, segmentation_dir: str, d
     width, height = camera.width, camera.height
 
     # foreach image
-    for id in range(sparse_model.num_images()):
+    for i, image_id in enumerate(sparse_model.images):
 
         # read extrinsics matrix
-        image = sparse_model.image(id)
+        image = sparse_model.image(image_id)
         extrinsics = np.concat([image.cam_from_world().matrix(), [[0, 0, 0, 1]]])
 
         # read image data
@@ -115,7 +115,7 @@ def finalize(conn: sqlite3.Connection, scale_path: str, segmentation_dir: str, d
         intrinsics_json = json.dumps(intrinsics.flatten().tolist())
         conn.execute(
             "INSERT INTO images VALUES (?, ?, ?, ?, ?, ?)",
-            (id, extrinsics_json, intrinsics_json, width, height, blob.tobytes())
+            (i, extrinsics_json, intrinsics_json, width, height, blob.tobytes())
         )
 
         # read segmentations
@@ -136,16 +136,16 @@ def finalize(conn: sqlite3.Connection, scale_path: str, segmentation_dir: str, d
 
             conn.execute(
                 "INSERT INTO segmentations (image_id, class_name, confidence, mask) VALUES (?, ?, ?, ?)",
-                (id, class_name, confidence, mask_blob)
+                (i, class_name, confidence, mask_blob)
             )
 
     # write sparse points
     rows = []
-    for id in sparse_model.point3D_ids():
-        point = sparse_model.point3D(id)
+    for i, point_id in enumerate(sparse_model.point3D_ids()):
+        point = sparse_model.point3D(point_id)
         x, y, z = point.xyz.astype(np.float32)
         r, g, b = point.color.astype(np.uint8)
-        rows.append((id, float(x), float(y), float(z), int(r), int(g), int(b)))
+        rows.append((i, float(x), float(y), float(z), int(r), int(g), int(b)))
     conn.executemany("INSERT INTO sparse_points VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
 
     # write dense points
