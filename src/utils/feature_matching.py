@@ -6,7 +6,10 @@ import os
 import kornia
 import kornia.core.utils
 import numpy as np
+import rich.progress
 import torch
+
+import context
 
 
 # internal data structure
@@ -89,6 +92,8 @@ def extract_feature_and_match(
     depth_confidence: float,
     width_confidence: float,
 ) -> FeatureMatchingResult:
+    ctx = context.Context()
+
     def impl():
         device = kornia.core.utils.get_cuda_or_mps_device_if_available()
 
@@ -100,7 +105,7 @@ def extract_feature_and_match(
         matches_dict = dict[tuple[int, int], np.ndarray]()
 
         model_disk = kornia.feature.DISK.from_pretrained("depth").to(device).eval()
-        for i in matching_pairs.image_indices:
+        for i in rich.progress.track(matching_pairs.image_indices, description="Feature extract images...", total=len(matching_pairs.image_indices), console=ctx.console):
             image_mask = image_masks[i]
 
             image_path = image_mask.image_path
@@ -125,6 +130,7 @@ def extract_feature_and_match(
             descriptors_dict[i] = descriptors[valid_mask].detach().clone()
             lafs_dict[i] = lafs[valid_mask].detach().clone()
 
+        ctx.logger.info("Feature matching...")
         model_lg = kornia.feature.LightGlueMatcher("disk", { "depth_confidence": depth_confidence, "width_confidence": width_confidence }).to(device).eval()
         for i, j in matching_pairs.pair_indices:
             _, matches = model_lg(descriptors_dict[i], descriptors_dict[j], lafs_dict[i][None, ...], lafs_dict[j][None, ...], hw1=image_sizes[i], hw2=image_sizes[j])

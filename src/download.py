@@ -2,7 +2,6 @@ import logging
 import os
 import subprocess
 
-os.environ["ULTRALYTICS_HOME"] = ".cache/ultralytics"
 os.environ["TORCH_HOME"] = ".cache/torch"
 os.environ["HF_HOME"] = ".cache/huggingface"
 # os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -11,7 +10,6 @@ import kornia
 import rich
 import rich.logging
 import transformers
-import ultralytics
 
 
 def main():
@@ -25,14 +23,15 @@ def main():
     logger.addHandler(handler)
 
 
-    logger.info("download YOLO26 weights")
-    ultralytics.YOLO(os.path.join(os.environ["ULTRALYTICS_HOME"], "yolo26x-seg.pt"))
-
     logger.info("download DISK weights")
     kornia.feature.DISK.from_pretrained("depth")
 
     logger.info("download LightGlue weights")
     kornia.feature.LightGlueMatcher("disk")
+
+    logger.info("download Mask2Former weights")
+    transformers.AutoImageProcessor.from_pretrained("facebook/mask2former-swin-large-cityscapes-semantic")
+    transformers.Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-large-cityscapes-semantic")
 
     logger.info("download Grounding Dino weights")
     transformers.AutoProcessor.from_pretrained("IDEA-Research/grounding-dino-base")

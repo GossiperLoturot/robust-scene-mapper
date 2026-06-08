@@ -19,7 +19,6 @@ class FeatureMatchingTask(luigi.Task):
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
     height: luigi.IntParameter = luigi.IntParameter()
-    mask_classes: luigi.ListParameter = luigi.ListParameter()
     max_keypoints: luigi.IntParameter = luigi.IntParameter()
     depth_confidence: luigi.FloatParameter = luigi.FloatParameter()
     width_confidence: luigi.FloatParameter = luigi.FloatParameter()
@@ -36,7 +35,6 @@ class FeatureMatchingTask(luigi.Task):
             fps=self.fps,
             width=self.width,
             height=self.height,
-            mask_classes=self.mask_classes,
         )
         return [video_sampling, object_masking]
 

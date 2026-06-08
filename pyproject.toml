@@ -16,5 +16,4 @@ dependencies = [
     "torch==2.10.0",
     "transformers>=5.9.0",
     "trimesh>=4.12.2",
-    "ultralytics-opencv-headless>=8.3.145",
 ]

@@ -1,7 +1,6 @@
 import os
 import glob
 
-os.environ["ULTRALYTICS_HOME"] = ".cache/ultralytics"
 os.environ["TORCH_HOME"] = ".cache/torch"
 os.environ["HF_HOME"] = ".cache/huggingface"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -11,6 +10,7 @@ import yaml
 
 import context
 import tasks.finalize
+import tasks.reconstruction
 
 
 class DispatchTask(luigi.WrapperTask):
@@ -18,7 +18,6 @@ class DispatchTask(luigi.WrapperTask):
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
     height: luigi.IntParameter = luigi.IntParameter()
-    mask_classes: luigi.ListParameter = luigi.ListParameter()
     max_keypoints: luigi.IntParameter = luigi.IntParameter()
     depth_confidence: luigi.FloatParameter = luigi.FloatParameter()
     width_confidence: luigi.FloatParameter = luigi.FloatParameter()
@@ -33,22 +32,17 @@ class DispatchTask(luigi.WrapperTask):
     def requires(self):
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.finalize.FinalizeTask(
+            task = tasks.reconstruction.ReconstructionTask(
                 input_path=input_path,
                 fps=self.fps,
                 width=self.width,
                 height=self.height,
-                mask_classes=self.mask_classes,
                 max_keypoints=self.max_keypoints,
                 depth_confidence=self.depth_confidence,
                 width_confidence=self.width_confidence,
                 init_frame_width=self.init_frame_width,
                 init_frame_height=self.init_frame_height,
-                init_focal_length=self.init_focal_length,
-                seg_classes=self.seg_classes,
-                depth_tree_size=self.depth_tree_size,
-                point_weight=self.point_weight,
-                trim_confidence=self.trim_confidence,
+                init_focal_length=self.init_focal_length
             )
             all_tasks.append(task)
         return all_tasks
