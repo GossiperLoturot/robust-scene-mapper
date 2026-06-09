@@ -9,8 +9,7 @@ import luigi
 import yaml
 
 import context
-import tasks.finalize
-import tasks.reconstruction
+import tasks.depth
 
 
 class DispatchTask(luigi.WrapperTask):
@@ -24,6 +23,7 @@ class DispatchTask(luigi.WrapperTask):
     init_frame_width: luigi.IntParameter = luigi.IntParameter()
     init_frame_height: luigi.IntParameter = luigi.IntParameter()
     init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
+    align_confidence: luigi.FloatParameter = luigi.FloatParameter()
     seg_classes: luigi.ListParameter = luigi.ListParameter()
     depth_tree_size: luigi.IntParameter = luigi.IntParameter()
     point_weight: luigi.FloatParameter = luigi.FloatParameter()
@@ -32,7 +32,7 @@ class DispatchTask(luigi.WrapperTask):
     def requires(self):
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.reconstruction.ReconstructionTask(
+            task = tasks.depth.DepthAlignTask(
                 input_path=input_path,
                 fps=self.fps,
                 width=self.width,
@@ -42,7 +42,8 @@ class DispatchTask(luigi.WrapperTask):
                 width_confidence=self.width_confidence,
                 init_frame_width=self.init_frame_width,
                 init_frame_height=self.init_frame_height,
-                init_focal_length=self.init_focal_length
+                init_focal_length=self.init_focal_length,
+                align_confidence=self.align_confidence,
             )
             all_tasks.append(task)
         return all_tasks

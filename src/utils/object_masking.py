@@ -32,14 +32,21 @@ ALL_CATEGORIES = [
     "bicycle"
 ]
 STATIC_CATEGORIES = [
-    "person",
-    "rider",
-    "car",
-    "truck",
-    "bus",
-    "train",
-    "motorcycle",
-    "bicycle"
+    "road",
+    "sidewalk",
+    "building",
+    "wall",
+    "fence",
+    "pole",
+    "traffic light",
+    "traffic sign",
+    "vegetation",
+    "terrain",
+    "sky",
+]
+PLANAR_CATEGORIES = [
+    "road",
+    "sidewalk",
 ]
 
 
@@ -52,7 +59,7 @@ STATIC_CATEGORIES = [
 
 
 @torch.inference_mode()
-def object_masking(image_dir: str, mask_dir: str):
+def object_masking(image_dir: str, static_mask_dir: str, planar_mask_dir: str):
     ctx = context.Context()
 
     def impl():
@@ -86,12 +93,20 @@ def object_masking(image_dir: str, mask_dir: str):
             #         cv2.putText(dbg_image, cat, centroids[i].astype(np.int32), cv2.FONT_HERSHEY_SIMPLEX, 16 / 30.0, [0, 0, 0], 1)
             # cv2.imwrite(os.path.join(dbg_dir, filename), dbg_image)
 
-            # object masking
+            # dynamic object masking
             overlay = np.zeros_like(image)
             for id, cat in enumerate(ALL_CATEGORIES):
-                if not cat in STATIC_CATEGORIES:
+                if cat in STATIC_CATEGORIES:
                     overlay[semantic_seg == id] = 255
-            cv2.imwrite(os.path.join(mask_dir, filename), overlay)
+            cv2.imwrite(os.path.join(static_mask_dir, filename), overlay)
+
+            # planar object masking
+            overlay = np.zeros_like(image)
+            for id, cat in enumerate(ALL_CATEGORIES):
+                if cat in PLANAR_CATEGORIES:
+                    overlay[semantic_seg == id] = 255
+            cv2.imwrite(os.path.join(planar_mask_dir, filename), overlay)
+
 
     impl()
     gc.collect()

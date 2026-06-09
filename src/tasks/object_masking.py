@@ -37,11 +37,14 @@ class ObjectMaskingTask(luigi.Task):
             [[video_sampling]] = self.input()
             image_dir = os.path.join(video_sampling.read(), "images")
 
-            mask_dir = os.path.join(temp_dir, "masks")
-            os.makedirs(mask_dir, exist_ok=True)
+            static_mask_dir = os.path.join(temp_dir, "static_masks")
+            os.makedirs(static_mask_dir, exist_ok=True)
+            planar_mask_dir = os.path.join(temp_dir, "planar_masks")
+            os.makedirs(planar_mask_dir, exist_ok=True)
 
-            utils.object_masking.object_masking(image_dir, mask_dir)
+            utils.object_masking.object_masking(image_dir, static_mask_dir, planar_mask_dir)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            shutil.move(mask_dir, output.open())
+            shutil.move(static_mask_dir, output.open())
+            shutil.move(planar_mask_dir, output.open())
