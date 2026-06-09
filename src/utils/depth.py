@@ -75,6 +75,43 @@ def depth_to_world_point(
     return np.concatenate(points_all, 0), np.concatenate(colors_all, 0)
 
 
+def raycast_to_world_point(
+    K: np.ndarray,
+    ext_w2c: np.ndarray,
+    image: np.ndarray,
+    mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    N, H, W, _ = image.shape
+    us, vs = np.meshgrid(np.arange(W), np.arange(H))
+    ones = np.ones_like(us)
+    pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (u, v, 1.0) in (H * W, 3)
+
+    points_all, colors_all = [], []
+    for i in range(N):
+        valid = mask[i] > 0
+        if not np.any(valid):
+            continue
+
+        vidx = np.flatnonzero(valid.reshape(-1))  # int in (H, W)
+
+        K_inv = np.linalg.inv(K[i])  # float in (3, 3) intrisics
+        c2w = np.linalg.inv(ext_w2c[i])  # float in (4, 4) camera to world
+
+        rays = K_inv @ pix[vidx].T  # (x, y, z) in (3, M) perspective rays direction
+        camera_w, rays_w = c2w[:3, 3], c2w[:3, :3] @ rays
+        d = -camera_w[2] / rays_w[2, :]
+        Xw = (camera_w[:, None] + d[None, :] * rays_w).T.astype(np.float32)  # (M, 3) points
+        colors = image[i].reshape(-1, 3)[vidx].astype(np.uint8)  # (M, 3) colors
+
+        points_all.append(Xw)
+        colors_all.append(colors)
+
+    if len(points_all) == 0:
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.uint8)
+
+    return np.concatenate(points_all, 0), np.concatenate(colors_all, 0)
+
+
 def transform_for_optimize_plane(points: np.ndarray) -> np.ndarray:
     centroid = np.mean(points, axis=0)
     cpts = points - centroid

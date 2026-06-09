@@ -12,7 +12,10 @@ dispatch:
   init_frame_width: 512
   init_frame_height: 288
   init_focal_length: 300.0
-  align_confidence: 0.5
+  align_confidence: 0.1
+  highres_width: 1280
+  highres_height: 720
+
   seg_classes: ["road", "sidewalk", "white line", "road sign", "utility pole", "fence", "building", "vegetation", "tree"]
   depth_tree_size: 10
   point_weight: 4.0

@@ -24,6 +24,9 @@ class DispatchTask(luigi.WrapperTask):
     init_frame_height: luigi.IntParameter = luigi.IntParameter()
     init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
     align_confidence: luigi.FloatParameter = luigi.FloatParameter()
+    highres_width: luigi.IntParameter = luigi.IntParameter()
+    highres_height: luigi.IntParameter = luigi.IntParameter()
+
     seg_classes: luigi.ListParameter = luigi.ListParameter()
     depth_tree_size: luigi.IntParameter = luigi.IntParameter()
     point_weight: luigi.FloatParameter = luigi.FloatParameter()
@@ -44,6 +47,8 @@ class DispatchTask(luigi.WrapperTask):
                 init_frame_height=self.init_frame_height,
                 init_focal_length=self.init_focal_length,
                 align_confidence=self.align_confidence,
+                highres_width=self.highres_width,
+                highres_height=self.highres_height,
             )
             all_tasks.append(task)
         return all_tasks
