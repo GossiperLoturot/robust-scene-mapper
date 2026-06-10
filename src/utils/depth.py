@@ -183,3 +183,11 @@ def undistort_image_dir(model_dir: str, image_dir: str, rgb: bool) -> np.ndarray
         shutil.rmtree(undistort_dir, ignore_errors=True)
 
         return images
+
+
+def voxel_downsample(xyz: np.ndarray, rgb: np.ndarray, voxel_size: float) -> tuple[np.ndarray, np.ndarray]:
+    voxel_indices = np.floor(xyz / voxel_size).astype(int)
+    _, first_indices = np.unique(voxel_indices, axis=0, return_index=True)
+    downsampled_xyz = xyz[first_indices]
+    downsampled_rgb = rgb[first_indices]
+    return downsampled_xyz, downsampled_rgb

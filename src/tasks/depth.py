@@ -202,7 +202,6 @@ class DepthAlignTask(luigi.Task):
             path_ref, path_est, scale = utils.depth.align_path_from_extrinsics(extrinsics_ref, extrinsics_est)
             depth_ref = depth_est / scale
             ctx.logger.info(f"align scale: {scale}")
-
             # debug aligned trajectory
             fig_path = os.path.join(temp_dir, "trajectory.png")
             utils.depth.plot_path(fig_path, path_ref, path_est)
@@ -211,6 +210,10 @@ class DepthAlignTask(luigi.Task):
             points, _ = utils.depth.depth_to_world_point(depth_ref, intrinsics_est, extrinsics_ref, image_est, mask_est, conf_est, self.align_confidence)
             world_to_plane = utils.depth.transform_for_optimize_plane(points)  # z = 0 plane
             extrinsics_plane = extrinsics_ref @ np.linalg.inv(world_to_plane)
+            # write params
+            params_path = os.path.join(temp_dir, "params.npz")
+            with open(params_path, "wb") as f:
+                np.savez_compressed(f, allow_pickle=False, world_to_plane=world_to_plane, scale=scale)
 
             # create highres model
             highres_model_dir = os.path.join(temp_dir, "highres_model")
@@ -236,6 +239,7 @@ class DepthAlignTask(luigi.Task):
             intrinsics_highres[:, 0, 2] *= highres_image.shape[2] / image_est.shape[2]
             intrinsics_highres[:, 1, 2] *= highres_image.shape[1] / image_est.shape[1]
             points, colors = utils.depth.raycast_to_world_point(intrinsics_highres, extrinsics_plane, highres_image, highres_mask)
+            points, colors = utils.depth.voxel_downsample(points, colors, 0.01 / scale)
 
             # write points as glTF 2.0 format
             object_path = os.path.join(temp_dir, "object.glb")
@@ -247,4 +251,5 @@ class DepthAlignTask(luigi.Task):
             ctx.logger.info("writing output to database")
             [output] = self.output()
             shutil.move(fig_path, output.open())
+            shutil.move(params_path, output.open())
             shutil.move(object_path, output.open())

@@ -9,7 +9,7 @@ import luigi
 import yaml
 
 import context
-import tasks.depth
+import tasks.merge_geometry
 
 
 class DispatchTask(luigi.WrapperTask):
@@ -35,7 +35,7 @@ class DispatchTask(luigi.WrapperTask):
     def requires(self):
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.depth.DepthAlignTask(
+            task = tasks.merge_geometry.MergeGeometryTask(
                 input_path=input_path,
                 fps=self.fps,
                 width=self.width,
