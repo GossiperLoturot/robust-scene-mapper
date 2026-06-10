@@ -17,6 +17,7 @@ class ObjectMaskingTask(luigi.Task):
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
     height: luigi.IntParameter = luigi.IntParameter()
+    mask_categories: luigi.ListParameter = luigi.ListParameter()
 
     def requires(self):
         video_sampling = tasks.video_sampling.VideoSamplingTask(
@@ -37,14 +38,11 @@ class ObjectMaskingTask(luigi.Task):
             [[video_sampling]] = self.input()
             image_dir = os.path.join(video_sampling.read(), "images")
 
-            static_mask_dir = os.path.join(temp_dir, "static_masks")
-            os.makedirs(static_mask_dir, exist_ok=True)
-            planar_mask_dir = os.path.join(temp_dir, "planar_masks")
-            os.makedirs(planar_mask_dir, exist_ok=True)
+            mask_dir = os.path.join(temp_dir, "masks")
+            os.makedirs(mask_dir, exist_ok=True)
 
-            utils.object_masking.object_masking(image_dir, static_mask_dir, planar_mask_dir)
+            utils.object_masking.object_masking(image_dir, mask_dir, self.mask_categories)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            shutil.move(static_mask_dir, output.open())
-            shutil.move(planar_mask_dir, output.open())
+            shutil.move(mask_dir, output.open())

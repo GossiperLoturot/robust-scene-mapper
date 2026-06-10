@@ -1,7 +1,13 @@
+import os
+import shutil
+import tempfile
+
+import cv2
 import evo.core.trajectory
 import evo.tools.plot
 import matplotlib.pyplot as plt
 import numpy as np
+import pycolmap
 import scipy.optimize
 
 
@@ -143,3 +149,37 @@ def transform_for_optimize_plane(points: np.ndarray) -> np.ndarray:
     matrix[:3, :3] = rot_matrix
     matrix[:3, 3] = t
     return matrix
+
+
+def resize_model(model: pycolmap.Reconstruction, width: int, height: int):
+    for camera_id in model.cameras:
+        camera = model.cameras[camera_id]
+        camera.params[0] *= width / camera.width
+        camera.params[1] *= height / camera.height
+        camera.params[2] *= width / camera.width
+        camera.params[3] *= height / camera.height
+        camera.width = width
+        camera.height = height
+
+
+def undistort_image_dir(model_dir: str, image_dir: str, rgb: bool) -> np.ndarray:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        undistort_dir = os.path.join(temp_dir, "undistort")
+        os.makedirs(undistort_dir, exist_ok=True)
+        pycolmap.undistort_images(undistort_dir, model_dir, image_dir)
+        undistort_image_dir = os.path.join(undistort_dir, "images")
+
+        # read highres mask
+        images = []
+        for filename in sorted(os.listdir(undistort_image_dir)):
+            image_path = os.path.join(undistort_image_dir, filename)
+            if rgb:
+                images.append(cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2RGB))
+            else:
+                images.append(cv2.imread(image_path, cv2.IMREAD_GRAYSCALE))
+        images = np.array(images)
+
+        # cleanup
+        shutil.rmtree(undistort_dir, ignore_errors=True)
+
+        return images

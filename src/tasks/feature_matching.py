@@ -10,6 +10,7 @@ import tasks.object_masking
 import tasks.video_sampling
 import utils.feature_matching
 import utils.task
+import utils.object_masking
 
 
 class FeatureMatchingTask(luigi.Task):
@@ -35,6 +36,7 @@ class FeatureMatchingTask(luigi.Task):
             fps=self.fps,
             width=self.width,
             height=self.height,
+            mask_categories=utils.object_masking.STATIC_CATEGORIES,
         )
         return [video_sampling, object_masking]
 
@@ -47,7 +49,7 @@ class FeatureMatchingTask(luigi.Task):
         with tempfile.TemporaryDirectory() as temp_dir:
             [[video_sampling], [object_masking]] = self.input()
             image_dir = os.path.join(video_sampling.read(), "images")
-            mask_dir = os.path.join(object_masking.read(), "static_masks")
+            mask_dir = os.path.join(object_masking.read(), "masks")
 
             image_masks = utils.feature_matching.load_image_masks(image_dir, mask_dir)
             matching_pairs = utils.feature_matching.generate_matching_pairs(len(image_masks))
