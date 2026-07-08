@@ -68,7 +68,7 @@ def object_masking(image_dir: str, mask_dir: str, categories: list[str]):
 
     def impl():
         model_id = "facebook/mask2former-swin-large-cityscapes-semantic"
-        image_processor = transformers.AutoImageProcessor.from_pretrained(model_id)
+        processor = transformers.Mask2FormerImageProcessor.from_pretrained(model_id)
         model = transformers.Mask2FormerForUniversalSegmentation.from_pretrained(model_id, device_map="auto")
 
         filenames = os.listdir(image_dir)
@@ -80,9 +80,9 @@ def object_masking(image_dir: str, mask_dir: str, categories: list[str]):
             w, h = image.shape[1], image.shape[0]
 
             # semantic segmentation by mask2former (cityscape dataset)
-            inputs = image_processor(image, return_tensors="pt").to(model.device)
+            inputs = processor(image, return_tensors="pt").to(model.device)
             outputs = model(**inputs)
-            results = image_processor.post_process_semantic_segmentation(outputs, target_sizes=[(h, w)])[0]
+            results = processor.post_process_semantic_segmentation(outputs, target_sizes=[(h, w)])[0]
 
             seg = results.cpu().numpy()
 
@@ -111,7 +111,7 @@ def debug_segmentation(image_dir: str, segmentation_dir: str):
 
     def impl():
         model_id = "facebook/mask2former-swin-large-cityscapes-semantic"
-        image_processor = transformers.AutoImageProcessor.from_pretrained(model_id)
+        processor = transformers.Mask2FormerImageProcessor.from_pretrained(model_id)
         model = transformers.Mask2FormerForUniversalSegmentation.from_pretrained(model_id, device_map="auto")
 
         filenames = os.listdir(image_dir)
@@ -123,9 +123,9 @@ def debug_segmentation(image_dir: str, segmentation_dir: str):
             w, h = image.shape[1], image.shape[0]
 
             # semantic segmentation by mask2former (cityscape dataset)
-            inputs = image_processor(image, return_tensors="pt").to(model.device)
+            inputs = processor(image, return_tensors="pt").to(model.device)
             outputs = model(**inputs)
-            results = image_processor.post_process_semantic_segmentation(outputs, target_sizes=[(h, w)])[0]
+            results = processor.post_process_semantic_segmentation(outputs, target_sizes=[(h, w)])[0]
 
             seg = results.cpu().numpy()
 
@@ -142,7 +142,7 @@ def debug_segmentation(image_dir: str, segmentation_dir: str):
                     cv2.putText(debug_image, cat, centroids[i].astype(np.int32), cv2.FONT_HERSHEY_SIMPLEX, 16 / 30.0, [0, 0, 0], 1)
 
             # write image
-            cv2.imwrite(os.path.join(segmentation_dir, filename), debug_image)
+            cv2.imwrite(os.path.join(segmentation_dir, filename), cv2.cvtColor(debug_image, cv2.COLOR_RGB2BGR))
 
     impl()
     gc.collect()

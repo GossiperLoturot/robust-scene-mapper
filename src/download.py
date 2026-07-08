@@ -30,12 +30,12 @@ def main():
     kornia.feature.LightGlueMatcher("disk")
 
     logger.info("download Mask2Former weights")
-    transformers.AutoImageProcessor.from_pretrained("facebook/mask2former-swin-large-cityscapes-semantic")
+    transformers.Mask2FormerImageProcessor.from_pretrained("facebook/mask2former-swin-large-cityscapes-semantic")
     transformers.Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-large-cityscapes-semantic")
 
     logger.info("download Grounding Dino weights")
-    transformers.AutoProcessor.from_pretrained("IDEA-Research/grounding-dino-base")
-    transformers.AutoModelForZeroShotObjectDetection.from_pretrained("IDEA-Research/grounding-dino-base")
+    transformers.GroundingDinoProcessor.from_pretrained("IDEA-Research/grounding-dino-base")
+    transformers.GroundingDinoModelForZeroShotObjectDetection.from_pretrained("IDEA-Research/grounding-dino-base")
 
     logger.info("download SAM2 weights")
     transformers.Sam2Processor.from_pretrained("facebook/sam2.1-hiera-large")

@@ -88,12 +88,17 @@ class ReconstructionTask(luigi.Task):
             os.makedirs(single_model_dir, exist_ok=True)
 
             # run reconstruct
-            utils.reconstruction.incremental_reconstruction(
-                db_path=db_path,
-                image_dir=image_dir,
-                input_model_dir=models_dir,
-                output_model_dir=single_model_dir,
-            )
+            while True:
+                try:
+                    utils.reconstruction.incremental_reconstruction(
+                        db_path=db_path,
+                        image_dir=image_dir,
+                        input_model_dir=models_dir,
+                        output_model_dir=single_model_dir,
+                    )
+                    break
+                except Exception as e:
+                    ctx.logger.warning(f"reconstruction failed with error: {e}, retrying...")
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
