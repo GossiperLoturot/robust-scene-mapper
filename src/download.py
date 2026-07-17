@@ -35,7 +35,7 @@ def main():
 
     logger.info("download Grounding Dino weights")
     transformers.GroundingDinoProcessor.from_pretrained("IDEA-Research/grounding-dino-base")
-    transformers.GroundingDinoModelForZeroShotObjectDetection.from_pretrained("IDEA-Research/grounding-dino-base")
+    transformers.GroundingDinoForObjectDetection.from_pretrained("IDEA-Research/grounding-dino-base")
 
     logger.info("download SAM2 weights")
     transformers.Sam2Processor.from_pretrained("facebook/sam2.1-hiera-large")

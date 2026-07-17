@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pycolmap
 import scipy.optimize
+import open3d
 
 
 def align_path_from_extrinsics(
@@ -170,13 +171,17 @@ def undistort_image_dir(model_dir: str, image_dir: str, rgb: bool) -> np.ndarray
         undistort_image_dir = os.path.join(undistort_dir, "images")
 
         # read highres mask
-        images = []
+        images = list[np.ndarray]()
         for filename in sorted(os.listdir(undistort_image_dir)):
             image_path = os.path.join(undistort_image_dir, filename)
             if rgb:
-                images.append(cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2RGB))
+                image = cv2.imread(image_path)
+                assert isinstance(image, np.ndarray), f"Failed to read image: {filename}"
+                images.append(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
             else:
-                images.append(cv2.imread(image_path, cv2.IMREAD_GRAYSCALE))
+                image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                assert isinstance(image, np.ndarray), f"Failed to read image: {filename}"
+                images.append(image)
         images = np.array(images)
 
         # cleanup
@@ -186,8 +191,26 @@ def undistort_image_dir(model_dir: str, image_dir: str, rgb: bool) -> np.ndarray
 
 
 def voxel_downsample(xyz: np.ndarray, rgb: np.ndarray, voxel_size: float) -> tuple[np.ndarray, np.ndarray]:
-    voxel_indices = np.floor(xyz / voxel_size).astype(int)
-    _, first_indices = np.unique(voxel_indices, axis=0, return_index=True)
-    downsampled_xyz = xyz[first_indices]
-    downsampled_rgb = rgb[first_indices]
+    pcd = open3d.geometry.PointCloud()
+    pcd.points = open3d.utility.Vector3dVector(xyz)
+    pcd.colors = open3d.utility.Vector3dVector(rgb)
+    downsampled_pcd = pcd.voxel_down_sample(voxel_size=voxel_size)
+    downsampled_xyz = np.asarray(downsampled_pcd.points)
+    downsampled_rgb = np.asarray(downsampled_pcd.colors)
     return downsampled_xyz, downsampled_rgb
+
+
+def compute_normals(xyz: np.ndarray) -> np.ndarray:
+    pcd = open3d.geometry.PointCloud()
+    pcd.points = open3d.utility.Vector3dVector(xyz)
+    pcd.estimate_normals()
+    normals = np.asarray(pcd.normals)
+    return normals
+
+
+def clipping_sphere(xyz: np.ndarray, rgb: np.ndarray, center: np.ndarray, radius: float) -> tuple[np.ndarray, np.ndarray]:
+    distances = np.linalg.norm(xyz - center[None, :], axis=1)
+    mask = distances <= radius
+    clipped_xyz = xyz[mask]
+    clipped_rgb = rgb[mask]
+    return clipped_xyz, clipped_rgb

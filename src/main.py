@@ -9,7 +9,8 @@ import luigi
 import yaml
 
 import context
-import tasks.merge_geometry
+# import tasks.merge_geometry
+import tasks.depth
 
 
 class DispatchTask(luigi.WrapperTask):
@@ -26,6 +27,8 @@ class DispatchTask(luigi.WrapperTask):
     align_confidence: luigi.FloatParameter = luigi.FloatParameter()
     highres_width: luigi.IntParameter = luigi.IntParameter()
     highres_height: luigi.IntParameter = luigi.IntParameter()
+    downsample_resolution: luigi.FloatParameter = luigi.FloatParameter()
+    clipping_radius: luigi.FloatParameter = luigi.FloatParameter()
 
     seg_classes: luigi.ListParameter = luigi.ListParameter()
     depth_tree_size: luigi.IntParameter = luigi.IntParameter()
@@ -35,7 +38,24 @@ class DispatchTask(luigi.WrapperTask):
     def requires(self):
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.merge_geometry.MergeGeometryTask(
+            # task = tasks.merge_geometry.MergeGeometryTask(
+            #     input_path=input_path,
+            #     fps=self.fps,
+            #     width=self.width,
+            #     height=self.height,
+            #     max_keypoints=self.max_keypoints,
+            #     depth_confidence=self.depth_confidence,
+            #     width_confidence=self.width_confidence,
+            #     init_frame_width=self.init_frame_width,
+            #     init_frame_height=self.init_frame_height,
+            #     init_focal_length=self.init_focal_length,
+            #     align_confidence=self.align_confidence,
+            #     highres_width=self.highres_width,
+            #     highres_height=self.highres_height,
+            #     downsample_resolution=self.downsample_resolution,
+            #     clipping_radius=self.clipping_radius,
+            # )
+            task = tasks.depth.DepthAlignV2Task(
                 input_path=input_path,
                 fps=self.fps,
                 width=self.width,
@@ -47,8 +67,8 @@ class DispatchTask(luigi.WrapperTask):
                 init_frame_height=self.init_frame_height,
                 init_focal_length=self.init_focal_length,
                 align_confidence=self.align_confidence,
-                highres_width=self.highres_width,
-                highres_height=self.highres_height,
+                downsample_resolution=self.downsample_resolution,
+                clipping_radius=self.clipping_radius,
             )
             all_tasks.append(task)
         return all_tasks
@@ -64,6 +84,7 @@ if __name__ == "__main__":
 
     # set database from config
     ctx.database_dir = config["global"]["database_dir"]
+    ctx.retry_count = config["global"]["retry_count"]
 
     try:
         task = DispatchTask(**config["dispatch"])

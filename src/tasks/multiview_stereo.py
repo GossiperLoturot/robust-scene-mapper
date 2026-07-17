@@ -148,6 +148,7 @@ class StereoFusionTask(luigi.Task):
             kernel = np.ones((3, 3), np.uint8)
             for filename in os.listdir(undistort_mask_dir):
                 mask = cv2.imread(os.path.join(undistort_mask_dir, filename), cv2.IMREAD_GRAYSCALE)
+                assert isinstance(mask, np.ndarray), f"Failed to read mask image: {filename}"
                 mask = (mask > 127).astype(np.uint8) * 255
                 mask = cv2.erode(mask, kernel, iterations=1)
                 cv2.imwrite(os.path.join(refine_mask_dir, filename), mask)

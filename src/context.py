@@ -12,6 +12,7 @@ class Context:
     logger: logging.Logger
 
     database_dir: str
+    retry_count: int
 
     def __new__(cls):
         if cls._singleton is None:
@@ -30,3 +31,4 @@ class Context:
         self.logger.addHandler(self.handler)
 
         self.database_dir = "tasks"
+        self.retry_count = 8

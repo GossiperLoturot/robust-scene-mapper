@@ -88,7 +88,7 @@ class ReconstructionTask(luigi.Task):
             os.makedirs(single_model_dir, exist_ok=True)
 
             # run reconstruct
-            while True:
+            for _ in range(ctx.retry_count):
                 try:
                     utils.reconstruction.incremental_reconstruction(
                         db_path=db_path,

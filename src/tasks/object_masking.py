@@ -41,7 +41,7 @@ class ObjectMaskingTask(luigi.Task):
             mask_dir = os.path.join(temp_dir, "masks")
             os.makedirs(mask_dir, exist_ok=True)
 
-            utils.object_masking.object_masking(image_dir, mask_dir, self.mask_categories)
+            utils.object_masking.object_masking(image_dir, mask_dir, list(self.mask_categories))
 
             ctx.logger.info("writing output to database")
             [output] = self.output()

@@ -141,8 +141,10 @@ def refine_segmentation(image_dir: str, output_dir: str, text: list[str]):
         filenames = os.listdir(image_dir)
         for filename in rich.progress.track(filenames, description="Segmenting images...", total=len(filenames), console=ctx.console):
             image_path = os.path.join(image_dir, filename)
+            image = cv2.imread(image_path)
+            assert isinstance(image, np.ndarray), f"Failed to read image: {filename}"
 
-            image = cv2.cvtColor(cv2.imread(image_path), cv2.COLOR_BGR2RGB)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             assert isinstance(image, np.ndarray)
             w, h = image.shape[1], image.shape[0]
 

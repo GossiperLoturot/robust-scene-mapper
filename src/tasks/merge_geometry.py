@@ -4,7 +4,7 @@ import tempfile
 
 import luigi
 import numpy as np
-import trimesh
+import open3d
 
 import context
 import tasks.depth
@@ -27,6 +27,8 @@ class MergeGeometryTask(luigi.Task):
     align_confidence: luigi.FloatParameter = luigi.FloatParameter()
     highres_width: luigi.IntParameter = luigi.IntParameter()
     highres_height: luigi.IntParameter = luigi.IntParameter()
+    downsample_resolution: luigi.FloatParameter = luigi.FloatParameter()
+    clipping_radius: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self):
         depth_align = tasks.depth.DepthAlignTask(
@@ -43,6 +45,8 @@ class MergeGeometryTask(luigi.Task):
             align_confidence=self.align_confidence,
             highres_width=self.highres_width,
             highres_height=self.highres_height,
+            downsample_resolution=self.downsample_resolution,
+            clipping_radius=self.clipping_radius,
         )
         stereo_fusion = tasks.multiview_stereo.StereoFusionTask(
             input_path=self.input_path,
@@ -57,7 +61,7 @@ class MergeGeometryTask(luigi.Task):
             init_focal_length=self.init_focal_length,
             highres_width=self.highres_width,
             highres_height=self.highres_height,
-            mask_categories=utils.object_masking.STATIC_CATEGORIES,
+            mask_categories=tuple(utils.object_masking.STATIC_CATEGORIES),
         )
         return [depth_align, stereo_fusion]
 
@@ -69,28 +73,26 @@ class MergeGeometryTask(luigi.Task):
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[depth_align], [stereo_fusion]] = self.input()
-            bev_path = os.path.join(depth_align.read(), "object.glb")
+            bev_path = os.path.join(depth_align.read(), "object.ply")
             params_path = os.path.join(depth_align.read(), "params.npz")
             fused_path = os.path.join(stereo_fusion.read(), "fused.ply")
 
-            bev = trimesh.load(bev_path)
-            fused = trimesh.load(fused_path)
+            bev = open3d.io.read_point_cloud(bev_path)
+            fused = open3d.io.read_point_cloud(fused_path)
             with open(params_path, "rb") as f:
                 params = np.load(f)
                 world_to_plane, scale = params["world_to_plane"], params["scale"]
             ctx.logger.info("read bev and fused meshes")
 
-            fused = fused.apply_transform(world_to_plane)
+            fused = fused.transform(world_to_plane)
 
-            bev.apply_scale(1.0 / scale)
-            fused.apply_scale(1.0 / scale)
+            bev.scale(1.0 / scale)
+            fused.scale(1.0 / scale)
 
-            # write points as glTF 2.0 format
-            object_path = os.path.join(temp_dir, "object.glb")
-            scene = trimesh.Scene()
-            scene.add_geometry(bev)
-            scene.add_geometry(fused)
-            scene.export(object_path)
+            # write points as PLY format
+            object_path = os.path.join(temp_dir, "object.ply")
+            pcd = fused + bev
+            open3d.io.write_point_cloud(object_path, pcd, write_ascii=False, compressed=True)
 
             [output] = self.output()
             shutil.move(object_path, output.open())

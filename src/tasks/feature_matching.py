@@ -36,7 +36,7 @@ class FeatureMatchingTask(luigi.Task):
             fps=self.fps,
             width=self.width,
             height=self.height,
-            mask_categories=utils.object_masking.STATIC_CATEGORIES,
+            mask_categories=tuple(utils.object_masking.STATIC_CATEGORIES),
         )
         return [video_sampling, object_masking]
 
