@@ -5,10 +5,12 @@ import tempfile
 import cv2
 import evo.core.trajectory
 import evo.tools.plot
+import faiss
 import matplotlib.pyplot as plt
 import numpy as np
 import pycolmap
-import faiss
+import rich.progress
+import torch
 
 import context
 
@@ -129,13 +131,14 @@ def alignment_model(
     xyz_guide: np.ndarray,  # (N, 3)
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ctx = context.Context()
+    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     assert xyz.shape[0] == rgb.shape[0] == ray.shape[0]
     assert xyz.shape[1] == 3 and rgb.shape[1] == 3 and (ray.shape[1] == 2 and ray.shape[2] == 3)
     assert xyz.dtype == np.float32 and rgb.dtype == np.uint8 and ray.dtype == np.float32
 
     N, _ = xyz.shape
-    ctx.logger.info(f"Alignment: {N} points.")
+    ctx.logger.info(f"alignment: {N} points.")
 
     # build faiss index
     res = faiss.StandardGpuResources()
@@ -143,35 +146,45 @@ def alignment_model(
     index_self.add(xyz)
 
     # find self nearest neighbors
-    K = 512
+    K = 256
     _, net_self = index_self.search(xyz, K)  # (N, K)
+    net_self = torch.from_numpy(net_self).long().to(dev)  # (N, K)
+    ctx.logger.info(f"computed nearest neighbors: {K} points.")
+    del index_self, res
 
     # compute ray directions
     raydirs = ray[:, 1] - ray[:, 0]  # (N, 3)
     raydirs = raydirs / np.linalg.norm(raydirs, axis=1, keepdims=True)  # (N, 3)
+    raydirs = torch.from_numpy(raydirs).float().to(dev)  # (N, 3)
 
-    normals = np.zeros_like(xyz)
-    current_xyz = xyz.copy()
-    for _ in range(32):
+    EPOCH, ALPHA, B = 32, -0.4, 4096
+    normals = torch.zeros((N, 3), dtype=torch.float32, device=dev)  # (N, 3)
+    current_xyz = torch.from_numpy(xyz).float().to(dev)  # (N, 3)
+    for epoch in rich.progress.track(range(EPOCH), description="alignment model", console=ctx.console):
         neighbors = current_xyz[net_self]  # (N, K, 3)
 
         # compute local center and normals
-        means = np.mean(neighbors, axis=1)  # (N, 3)
-        diff = neighbors - means[:, np.newaxis, :]  # (N, K, 3)
-        cov = np.matmul(diff.transpose(0, 2, 1), diff) / (K - 1)  # (N, 3, 3)
-        _, eigenvectors = np.linalg.eigh(cov)  # (N, 3, 3)
-        normals = eigenvectors[:, :, 0]  # (N, 3)
+        means = torch.mean(neighbors, dim=1)  # (N, 3)
+        diff = neighbors - means.unsqueeze(1)  # (N, K, 3)
+        cov = torch.bmm(diff.transpose(1, 2), diff) / (K - 1)  # (N, 3, 3)
+        # batch eigen decomposition for large N
+        normals_list = []
+        for i in range(0, N, B):
+            _, eigenvectors = torch.linalg.eigh(cov[i:i + B])  # (B, 3, 3)
+            normals_list.append(eigenvectors[:, :, 0])  # (B, 3)
+        normals = torch.cat(normals_list, dim=0)  # (N, 3)
 
-        normals = np.where(normals[:, 1, np.newaxis] > 0, -normals, normals)
+        normals = torch.where(normals[:, [1]] > 0, -normals, normals)
 
         # compute patch (local plane)
-        n_dot_r = np.sum(normals * raydirs, axis=1, keepdims=True)  # (N, 1)
-        d_dot_n = np.sum((current_xyz - means) * normals, axis=1, keepdims=True)  # (N, 1)
-        patch_term = -0.5 * d_dot_n * n_dot_r  # (N, 1)
-        ctx.logger.info(patch_term.mean())
+        n_dot_r = torch.sum(normals * raydirs, dim=1, keepdims=True)  # (N, 1)
+        d_dot_n = torch.sum((current_xyz - means) * normals, dim=1, keepdims=True)  # (N, 1)
+        patch_term = ALPHA * d_dot_n * n_dot_r  # (N, 1)
+        ctx.logger.info(f"[{1 + epoch}/{EPOCH}] displacement error: {torch.mean(patch_term)}")
 
         # apply
         current_xyz = current_xyz + patch_term * raydirs  # (N, 3)
-    xyz = current_xyz
+    xyz = current_xyz.cpu().numpy()
+    normals = normals.cpu().numpy()
 
     return xyz, rgb, normals
