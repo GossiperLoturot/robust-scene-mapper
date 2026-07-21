@@ -12,7 +12,7 @@ import tasks.reconstruction
 import tasks.video_sampling
 import tasks.object_masking
 import utils.task
-import utils.depth
+import utils.reconstruction
 
 
 class PatchMatchStereoTask(luigi.Task):
@@ -66,7 +66,7 @@ class PatchMatchStereoTask(luigi.Task):
             highres_model_dir = os.path.join(temp_dir, "highres_model")
             os.makedirs(highres_model_dir, exist_ok=True)
             highres_model = pycolmap.Reconstruction(model_dir)
-            utils.depth.resize_model(highres_model, self.highres_width, self.highres_height)
+            utils.reconstruction.resize_model(highres_model, self.highres_width, self.highres_height)
             highres_model.write(highres_model_dir)
 
             workspace_dir = os.path.join(temp_dir, "dense")

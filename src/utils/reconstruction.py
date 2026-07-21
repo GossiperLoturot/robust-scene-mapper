@@ -9,6 +9,17 @@ import utils.database
 import utils.feature_matching
 
 
+def resize_model(model: pycolmap.Reconstruction, width: int, height: int):
+    for camera_id in model.cameras:
+        camera = model.cameras[camera_id]
+        camera.params[0] *= width / camera.width
+        camera.params[1] *= height / camera.height
+        camera.params[2] *= width / camera.width
+        camera.params[3] *= height / camera.height
+        camera.width = width
+        camera.height = height
+
+
 def upload_database(
     db_path: str,
     pairs_path: str,

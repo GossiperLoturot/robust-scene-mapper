@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.13.0",
     "evo>=1.36.5",
+    "faiss-gpu>=1.14.3",
     "kornia>=0.8.1",
     "luigi>=3.8.1",
     "numpy>=2.2.6",
