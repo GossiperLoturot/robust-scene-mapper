@@ -25,9 +25,9 @@ class DispatchTask(luigi.WrapperTask):
     init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
     highres_width: luigi.IntParameter = luigi.IntParameter()
     highres_height: luigi.IntParameter = luigi.IntParameter()
-    align_confidence: luigi.FloatParameter = luigi.FloatParameter()
-    downsample_resolution: luigi.FloatParameter = luigi.FloatParameter()
-    clipping_radius: luigi.FloatParameter = luigi.FloatParameter()
+    ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
+    max_depth: luigi.FloatParameter = luigi.FloatParameter()
+    downsample_res: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self):
         all_tasks = []
@@ -45,9 +45,9 @@ class DispatchTask(luigi.WrapperTask):
                 init_focal_length=self.init_focal_length,
                 highres_width=self.highres_width,
                 highres_height=self.highres_height,
-                align_confidence=self.align_confidence,
-                downsample_resolution=self.downsample_resolution,
-                clipping_radius=self.clipping_radius,
+                ransac_threshold=self.ransac_threshold,
+                max_depth=self.max_depth,
+                downsample_res=self.downsample_res,
             )
             all_tasks.append(task)
         return all_tasks

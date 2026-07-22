@@ -15,6 +15,6 @@ dispatch:
   init_focal_length: 300.0
   highres_width: 1280
   highres_height: 720
-  align_confidence: 0.1
-  downsample_resolution: 0.01
-  clipping_radius: 50.0
+  ransac_threshold: 0.200
+  max_depth: 10.0
+  downsample_res: 0.01

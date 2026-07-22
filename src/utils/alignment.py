@@ -8,6 +8,9 @@ import evo.tools.plot
 import matplotlib.pyplot as plt
 import numpy as np
 import pycolmap
+import scipy.optimize
+import sklearn.linear_model
+import sklearn.preprocessing
 
 
 def undistort_image_dir(model_dir: str, image_dir: str, rgb: bool) -> np.ndarray:
@@ -62,37 +65,49 @@ def plot_path(
     fig.savefig(path)
 
 
-def depth_to_plane(
-    depth: np.ndarray,
+def depth_to_surface(
     K: np.ndarray,
     ext_w2c: np.ndarray,
     image: np.ndarray,
     mask: np.ndarray,
-    conf: np.ndarray,
-    conf_thr: float,
+    ransac_model: sklearn.linear_model.RANSACRegressor,
+    poly_model: sklearn.preprocessing.PolynomialFeatures,
+    init_depth: float = 5.0,
+    max_depth: float = 10.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     N, H, W, _ = image.shape
     us, vs = np.meshgrid(np.arange(W), np.arange(H))
     ones = np.ones_like(us)
-    pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (u, v, 1.0) in (H * W, 3)
+    pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (H * W, 3)
 
     points_all, colors_all = [], []
     for i in range(N):
-        valid = (depth[i] < 10.0) & (depth[i] > 0)  # boolean in (H, W)
-        valid &= conf[i] >= conf_thr
-        valid &= mask[i] > 0
+        valid = mask[i] > 0
         if not np.any(valid):
             continue
-        valid_idx = np.flatnonzero(valid.reshape(-1))  # int in (H, W)
+        valid_idx = np.flatnonzero(valid.reshape(-1))  # (H * W)
 
-        K_inv = np.linalg.inv(K[i])  # float in (3, 3) intrisics
-        c2w = np.linalg.inv(ext_w2c[i])  # float in (4, 4) camera to world
+        K_inv = np.linalg.inv(K[i])  # (3, 3) intrinsics
+        c2w = np.linalg.inv(ext_w2c[i])  # (4, 4) camera to world
 
-        rays = K_inv @ pix[valid_idx].T  # (x, y, z) in (3, M) perspective rays direction
-        camera_w, rays_w = c2w[:3, 3], c2w[:3, :3] @ rays  # (3, M) perspective rays direction in world
-        d = -camera_w[2] / rays_w[2, :]  # (M,) depth along the rays
-        pts_w = (camera_w[:, np.newaxis] + d[np.newaxis, :] * rays_w).T  # (M, 3) points
+        rays = K_inv @ pix[valid_idx].T  # (3, M) ray direction
+        camera_w, rays_w = c2w[:3, 3], c2w[:3, :3] @ rays  # (3, M) world camera position, (3, M) world ray direction
+
+        depth_init = np.ones(rays_w.shape[1]) * init_depth  # (M,) initial depth
+        def obj_fn(depth: np.ndarray) -> np.ndarray:
+            pts_current = (camera_w[:, np.newaxis] + depth[np.newaxis, :] * rays_w).T
+            X = poly_model.transform(pts_current[:, [0, 2]])
+            Y = ransac_model.predict(X)
+            return pts_current[:, 1] - Y
+        depth_opt = scipy.optimize.newton(obj_fn, depth_init, disp=False)
+        assert isinstance(depth_opt, np.ndarray)
+
+        pts_w = (camera_w[:, np.newaxis] + depth_opt[np.newaxis, :] * rays_w).T  # (M, 3) points
         colors = image[i].reshape(-1, 3)[valid_idx]  # (M, 3) colors
+
+        d_valid_idx = np.flatnonzero((depth_opt > 0.0) & (depth_opt < max_depth))
+        pts_w = pts_w[d_valid_idx]
+        colors = colors[d_valid_idx]
 
         points_all.append(pts_w)  # (M, 3)
         colors_all.append(colors)  # (M, 3)

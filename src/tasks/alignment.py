@@ -2,13 +2,13 @@ import os
 import shutil
 import tempfile
 
-import cv2
+import sklearn.linear_model
+import sklearn.preprocessing
 import luigi
 import numpy as np
-import open3d
 import open3d as o3d
 import pycolmap
-import scipy
+import cv2
 
 import context
 import tasks.depth
@@ -33,9 +33,10 @@ class AlignmentTask(luigi.Task):
     init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
     highres_width: luigi.IntParameter = luigi.IntParameter()
     highres_height: luigi.IntParameter = luigi.IntParameter()
-    align_confidence: luigi.FloatParameter = luigi.FloatParameter()
-    downsample_resolution: luigi.FloatParameter = luigi.FloatParameter()
-    clipping_radius: luigi.FloatParameter = luigi.FloatParameter()
+
+    ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
+    max_depth: luigi.FloatParameter = luigi.FloatParameter()
+    downsample_res: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self):
         object_masking = tasks.object_masking.ObjectMaskingTask(
@@ -124,77 +125,84 @@ class AlignmentTask(luigi.Task):
             extrinsics_guide = np.array(extrinsics_guide)
             # extract estimated model
             depth_output = np.load(depth_path)
+            image_est = depth_output["image"]
             extrinsics_est = depth_output["extrinsics"]
+            intrinsics_est = depth_output["intrinsics"]
             # align model (guided to estimated quantinity)
-            path_guide, path_est, rotate_g2e, translate_g2e, scale_g2e = utils.alignment.align_path_from_extrinsics(
-                extrinsics_guide,
-                extrinsics_est
-            )
+            path_guide, path_est, rotate_g2e, translate_g2e, scale_g2e = utils.alignment.align_path_from_extrinsics(extrinsics_guide, extrinsics_est)
             ctx.logger.info(f"guide to est scale: {scale_g2e}")
             # debug aligned trajectory
             fig_path = os.path.join(temp_dir, "trajectory.png")
             utils.alignment.plot_path(fig_path, path_guide, path_est)
 
-            # detect plane segment
-            pcd_guide = open3d.io.read_point_cloud(fused_guide_path)
+            # detect quadric surface
+            pcd_guide = o3d.io.read_point_cloud(fused_guide_path)
             pcd_guide.scale(scale_g2e, [0.0, 0.0, 0.0])
             pcd_guide.rotate(rotate_g2e, center=[0.0, 0.0, 0.0])
             pcd_guide.translate(translate_g2e)
-            model, _ = pcd_guide.segment_plane(distance_threshold=0.100, ransac_n=3, num_iterations=10000)
-            # align plane normal to z-axis
-            a, b, c, _ = model
-            normal = np.array([a, b, c])
-            normal /= np.linalg.norm(normal)
-            rot, _ = scipy.spatial.transform.Rotation.align_vectors([[0.0, 0.0, 1.0]], [normal])
-            rot_mat = rot.as_matrix()
-            t = -rot_mat @ pcd_guide.get_center()
-            hom_mat = np.eye(4)
-            hom_mat[:3, :3] = rot_mat
-            hom_mat[:3, 3] = t
+            # quadric surface fitting using RANSAC
+            poly = sklearn.preprocessing.PolynomialFeatures(degree=2, include_bias=False)
+            xyz_guide = np.asarray(pcd_guide.points)
+            x, y, z = xyz_guide[:, 0], xyz_guide[:, 1], xyz_guide[:, 2]
+            X, Y = poly.fit_transform(np.c_[x, z]), y
+            ransac = sklearn.linear_model.RANSACRegressor(
+                estimator=sklearn.linear_model.LinearRegression(),
+                min_samples=6,  # 5 coef + 1 bias
+                residual_threshold=self.ransac_threshold,
+                max_trials=100000,
+                random_state=42,
+            )
+            ransac.fit(X, Y)
+            inlier_mask = ransac.inlier_mask_
+            ctx.logger.info(f"ransac inlier ratio: {np.sum(inlier_mask) / len(inlier_mask)}")
+            # # [DEBUG] show fitting surface
+            # xx, zz = np.meshgrid(
+            #     np.linspace(-10.0, 10.0, 100),
+            #     np.linspace(-10.0, 10.0, 100)
+            # )
+            # yy = ransac.predict(poly.transform(np.c_[xx.ravel(), zz.ravel()]))
+            # xyz = np.c_[xx.ravel(), yy, zz.ravel()]
+            # pcd_surface = o3d.geometry.PointCloud()
+            # pcd_surface.points = o3d.utility.Vector3dVector(xyz)
+            # pcd_surface.paint_uniform_color([1.0, 0.0, 0.0])
+            # # [DEBUG] show inliers and outliers
+            # pcd_inliers = pcd_guide.select_by_index(np.where(inlier_mask)[0])
+            # pcd_outliers = pcd_guide.select_by_index(np.where(inlier_mask)[0], invert=True)
+            # pcd_inliers.paint_uniform_color([0.0, 1.0, 0.0])
+            # pcd = pcd_inliers + pcd_outliers + pcd_surface
 
             # transform reference model
-            pcd_ref = open3d.io.read_point_cloud(fused_path)
+            pcd_ref = o3d.io.read_point_cloud(fused_path)
             pcd_ref.scale(scale_g2e, [0.0, 0.0, 0.0])
             pcd_ref.rotate(rotate_g2e, center=[0.0, 0.0, 0.0])
             pcd_ref.translate(translate_g2e)
-            pcd_ref.transform(hom_mat)
 
-            # read depth
-            depth = depth_output["depth"]
-            image_est = depth_output["image"]
-            conf_est = depth_output["conf"]
-            intrinsics_est = depth_output["intrinsics"]
             # read mask
             mask = utils.alignment.undistort_image_dir(model_dir, mask_dir, rgb=False)
             mask_est = []
             for i in range(mask.shape[0]):
                 m = cv2.resize(mask[i], (image_est.shape[2], image_est.shape[1]), interpolation=cv2.INTER_AREA)
                 mask_est.append(m)
-            mask_est = np.array(mask_est)
-            mask_est = (mask_est > 127).astype(np.uint8)
-            # projection (z = 0) to plane
-            points, colors = utils.alignment.depth_to_plane(
-                depth,
+            mask_est = (np.array(mask_est) > 127).astype(np.uint8)
+            # projection to surface
+            points, colors = utils.alignment.depth_to_surface(
                 intrinsics_est,
-                extrinsics_est @ np.linalg.inv(hom_mat),
+                extrinsics_est,
                 image_est,
                 mask_est,
-                conf_est,
-                self.align_confidence
+                ransac,
+                poly,
+                max_depth=self.max_depth,
             )
-            pcd_est = open3d.geometry.PointCloud()
-            pcd_est.points = open3d.utility.Vector3dVector(points)
-            pcd_est.colors = open3d.utility.Vector3dVector(colors.astype(np.float64) / 255.0)
+            pcd_est = o3d.geometry.PointCloud()
+            pcd_est.points = o3d.utility.Vector3dVector(points)
+            pcd_est.colors = o3d.utility.Vector3dVector(colors.astype(np.float64) / 255.0)
+            pcd_est = pcd_est.voxel_down_sample(voxel_size=self.downsample_res)
 
             # write points as PLY format
             object_path = os.path.join(temp_dir, "object.ply")
             pcd = pcd_ref + pcd_est
-            min_bound = np.array([-30.0, -30.0, -30.0])
-            max_bound = np.array([ 30.0,  30.0,  30.0])
-            bbox = o3d.geometry.AxisAlignedBoundingBox(min_bound, max_bound)
-            pcd = pcd.crop(bbox)
-            pcd = pcd.voxel_down_sample(voxel_size=self.downsample_resolution)
-            open3d.io.write_point_cloud(object_path, pcd, write_ascii=False, compressed=True)
+            o3d.io.write_point_cloud(object_path, pcd, write_ascii=False, compressed=True)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
