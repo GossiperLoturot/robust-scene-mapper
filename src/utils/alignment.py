@@ -8,9 +8,12 @@ import evo.tools.plot
 import matplotlib.pyplot as plt
 import numpy as np
 import pycolmap
+import rich.progress
 import scipy.optimize
 import sklearn.linear_model
 import sklearn.preprocessing
+
+import context
 
 
 def undistort_image_dir(model_dir: str, image_dir: str, rgb: bool) -> np.ndarray:
@@ -75,13 +78,15 @@ def depth_to_surface(
     init_depth: float = 5.0,
     max_depth: float = 10.0,
 ) -> tuple[np.ndarray, np.ndarray]:
+    ctx = context.Context()
+
     N, H, W, _ = image.shape
     us, vs = np.meshgrid(np.arange(W), np.arange(H))
     ones = np.ones_like(us)
     pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (H * W, 3)
 
     points_all, colors_all = [], []
-    for i in range(N):
+    for i in rich.progress.track(range(N), total=N, description="depth to surface", console=ctx.console):
         valid = mask[i] > 0
         if not np.any(valid):
             continue
@@ -99,7 +104,7 @@ def depth_to_surface(
             X = poly_model.transform(pts_current[:, [0, 2]])
             Y = ransac_model.predict(X)
             return pts_current[:, 1] - Y
-        depth_opt = scipy.optimize.newton(obj_fn, depth_init, disp=False)
+        depth_opt = scipy.optimize.newton(obj_fn, depth_init)
         assert isinstance(depth_opt, np.ndarray)
 
         pts_w = (camera_w[:, np.newaxis] + depth_opt[np.newaxis, :] * rays_w).T  # (M, 3) points

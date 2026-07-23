@@ -2,13 +2,13 @@ import os
 import shutil
 import tempfile
 
-import sklearn.linear_model
-import sklearn.preprocessing
+import cv2
 import luigi
 import numpy as np
 import open3d as o3d
 import pycolmap
-import cv2
+import sklearn.linear_model
+import sklearn.preprocessing
 
 import context
 import tasks.depth
@@ -126,20 +126,21 @@ class AlignmentTask(luigi.Task):
             # extract estimated model
             depth_output = np.load(depth_path)
             image_est = depth_output["image"]
-            extrinsics_est = depth_output["extrinsics"]
+            extrinsics_est = depth_output["extrinsics"]  # world to camera matrix
             intrinsics_est = depth_output["intrinsics"]
             # align model (guided to estimated quantinity)
             path_guide, path_est, rotate_g2e, translate_g2e, scale_g2e = utils.alignment.align_path_from_extrinsics(extrinsics_guide, extrinsics_est)
-            ctx.logger.info(f"guide to est scale: {scale_g2e}")
-            # debug aligned trajectory
+            g2e_mat = np.eye(4)
+            g2e_mat[:3, :3] = scale_g2e * rotate_g2e
+            g2e_mat[:3, 3] = translate_g2e
+            ctx.logger.info(f"guide to est scale: {scale_g2e}, guide to est {g2e_mat}")
+            # [DEBUG] aligned trajectory
             fig_path = os.path.join(temp_dir, "trajectory.png")
             utils.alignment.plot_path(fig_path, path_guide, path_est)
 
             # detect quadric surface
             pcd_guide = o3d.io.read_point_cloud(fused_guide_path)
-            pcd_guide.scale(scale_g2e, [0.0, 0.0, 0.0])
-            pcd_guide.rotate(rotate_g2e, center=[0.0, 0.0, 0.0])
-            pcd_guide.translate(translate_g2e)
+            pcd_guide.transform(g2e_mat)
             # quadric surface fitting using RANSAC
             poly = sklearn.preprocessing.PolynomialFeatures(degree=2, include_bias=False)
             xyz_guide = np.asarray(pcd_guide.points)
@@ -173,9 +174,7 @@ class AlignmentTask(luigi.Task):
 
             # transform reference model
             pcd_ref = o3d.io.read_point_cloud(fused_path)
-            pcd_ref.scale(scale_g2e, [0.0, 0.0, 0.0])
-            pcd_ref.rotate(rotate_g2e, center=[0.0, 0.0, 0.0])
-            pcd_ref.translate(translate_g2e)
+            pcd_ref.transform(g2e_mat)
 
             # read mask
             mask = utils.alignment.undistort_image_dir(model_dir, mask_dir, rgb=False)
@@ -199,12 +198,35 @@ class AlignmentTask(luigi.Task):
             pcd_est.colors = o3d.utility.Vector3dVector(colors.astype(np.float64) / 255.0)
             pcd_est = pcd_est.voxel_down_sample(voxel_size=self.downsample_res)
 
+            # align global surface normal with y-axis and camera forward with z-axis
+            w2c_mat = extrinsics_est[0]
+            cam_up, cam_fwd, cam_pos = -w2c_mat[1, :3], w2c_mat[2, :3], -w2c_mat[:3, :3].T @ w2c_mat[:3, 3]
+            xcoef, zcoef = ransac.estimator_.coef_[0:2]  # extract x, z coefficients from quadric surface
+            normal = np.array([-xcoef, 1.0, -zcoef])  # quadric surface normal mean
+            normal = normal if np.dot(normal, cam_up) > 0.0 else -normal
+            normal = normal / np.linalg.norm(normal)
+            tangent = cam_fwd - np.dot(cam_fwd, normal) * normal
+            tangent = tangent / np.linalg.norm(tangent)
+            bitangent = np.cross(normal, tangent)
+            # make transform matrix
+            e2a_mat_t = np.eye(4)
+            e2a_mat_t[:3, 3] = -cam_pos
+            e2a_mat_r = np.eye(4)
+            e2a_mat_r[:3, :3] = np.vstack([bitangent, normal, tangent])
+            e2a_mat = e2a_mat_r @ e2a_mat_t
+
             # write points as PLY format
             object_path = os.path.join(temp_dir, "object.ply")
             pcd = pcd_ref + pcd_est
+            pcd.transform(e2a_mat)
             o3d.io.write_point_cloud(object_path, pcd, write_ascii=False, compressed=True)
+
+            # write alignment data as NPZ format
+            alignment_path = os.path.join(temp_dir, "alignment.npz")
+            np.savez(alignment_path, g2e_mat=g2e_mat, e2a_mat=e2a_mat)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            shutil.move(fig_path, output.open())
             shutil.move(object_path, output.open())
+            shutil.move(alignment_path, output.open())
+            shutil.move(fig_path, output.open())  # [DEBUG]
