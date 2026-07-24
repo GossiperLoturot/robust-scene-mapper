@@ -10,8 +10,7 @@ import numpy as np
 import pycolmap
 import rich.progress
 import scipy.optimize
-import sklearn.linear_model
-import sklearn.preprocessing
+import scipy.interpolate
 
 import context
 
@@ -68,13 +67,41 @@ def plot_path(
     fig.savefig(path)
 
 
-def depth_to_surface(
+def fit_to_tps(
+    xyz: np.ndarray,
+    threshold: float = 0.100,
+    max_iters: int = 1000,
+    sample_size: int = 10,
+) -> tuple[scipy.interpolate.RBFInterpolator, np.ndarray]:
+    ctx = context.Context()
+
+    best_count = 0
+    best_model, best_inliers = None, None
+    
+    for _ in rich.progress.track(range(max_iters), description="fit to tps", console=ctx.console):
+        idx = np.random.choice(xyz.shape[0], size=sample_size, replace=False)
+        model = scipy.interpolate.RBFInterpolator(
+            xyz[idx][:, [0, 2]],
+            xyz[idx][:, 1],
+            kernel="thin_plate_spline",
+            smoothing=0.0,
+        )
+        dist = np.abs(xyz[:, 1] - model(xyz[:, [0, 2]]))
+        count = np.sum(dist < threshold)
+        if count > best_count:
+            best_count = count
+            best_model, best_inliers = model, dist < threshold
+    assert isinstance(best_model, scipy.interpolate.RBFInterpolator)
+    assert isinstance(best_inliers, np.ndarray)
+    return best_model, best_inliers
+
+
+def project_to_tps(
     K: np.ndarray,
     ext_w2c: np.ndarray,
     image: np.ndarray,
     mask: np.ndarray,
-    ransac_model: sklearn.linear_model.RANSACRegressor,
-    poly_model: sklearn.preprocessing.PolynomialFeatures,
+    model: scipy.interpolate.RBFInterpolator,
     init_depth: float = 5.0,
     max_depth: float = 10.0,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -86,7 +113,7 @@ def depth_to_surface(
     pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (H * W, 3)
 
     points_all, colors_all = [], []
-    for i in rich.progress.track(range(N), total=N, description="depth to surface", console=ctx.console):
+    for i in rich.progress.track(range(N), total=N, description="project to tps", console=ctx.console):
         valid = mask[i] > 0
         if not np.any(valid):
             continue
@@ -100,10 +127,8 @@ def depth_to_surface(
 
         depth_init = np.ones(rays_w.shape[1]) * init_depth  # (M,) initial depth
         def obj_fn(depth: np.ndarray) -> np.ndarray:
-            pts_current = (camera_w[:, np.newaxis] + depth[np.newaxis, :] * rays_w).T
-            X = poly_model.transform(pts_current[:, [0, 2]])
-            Y = ransac_model.predict(X)
-            return pts_current[:, 1] - Y
+            xyz = (camera_w[:, np.newaxis] + depth[np.newaxis, :] * rays_w).T
+            return xyz[:, 1] - model(xyz[:, [0, 2]])
         depth_opt = scipy.optimize.newton(obj_fn, depth_init)
         assert isinstance(depth_opt, np.ndarray)
 

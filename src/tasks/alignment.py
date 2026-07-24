@@ -7,8 +7,6 @@ import luigi
 import numpy as np
 import open3d as o3d
 import pycolmap
-import sklearn.linear_model
-import sklearn.preprocessing
 
 import context
 import tasks.depth
@@ -138,37 +136,25 @@ class AlignmentTask(luigi.Task):
             fig_path = os.path.join(temp_dir, "trajectory.png")
             utils.alignment.plot_path(fig_path, path_guide, path_est)
 
-            # detect quadric surface
+            # detect thin plate spline
             pcd_guide = o3d.io.read_point_cloud(fused_guide_path)
             pcd_guide.transform(g2e_mat)
-            # quadric surface fitting using RANSAC
-            poly = sklearn.preprocessing.PolynomialFeatures(degree=2, include_bias=False)
-            xyz_guide = np.asarray(pcd_guide.points)
-            x, y, z = xyz_guide[:, 0], xyz_guide[:, 1], xyz_guide[:, 2]
-            X, Y = poly.fit_transform(np.c_[x, z]), y
-            ransac = sklearn.linear_model.RANSACRegressor(
-                estimator=sklearn.linear_model.LinearRegression(),
-                min_samples=6,  # 5 coef + 1 bias
-                residual_threshold=self.ransac_threshold,
-                max_trials=100000,
-                random_state=42,
-            )
-            ransac.fit(X, Y)
-            inlier_mask = ransac.inlier_mask_
-            ctx.logger.info(f"ransac inlier ratio: {np.sum(inlier_mask) / len(inlier_mask)}")
+            # thin plate spline fitting using RANSAC
+            model, inliers = utils.alignment.fit_to_tps(np.asarray(pcd_guide.points), self.ransac_threshold)
+            ctx.logger.info(f"ransac inlier ratio: {np.sum(inliers) / len(inliers)}")
             # # [DEBUG] show fitting surface
             # xx, zz = np.meshgrid(
             #     np.linspace(-10.0, 10.0, 100),
             #     np.linspace(-10.0, 10.0, 100)
             # )
-            # yy = ransac.predict(poly.transform(np.c_[xx.ravel(), zz.ravel()]))
+            # yy = model(np.c_[xx.ravel(), zz.ravel()])
             # xyz = np.c_[xx.ravel(), yy, zz.ravel()]
             # pcd_surface = o3d.geometry.PointCloud()
             # pcd_surface.points = o3d.utility.Vector3dVector(xyz)
             # pcd_surface.paint_uniform_color([1.0, 0.0, 0.0])
             # # [DEBUG] show inliers and outliers
-            # pcd_inliers = pcd_guide.select_by_index(np.where(inlier_mask)[0])
-            # pcd_outliers = pcd_guide.select_by_index(np.where(inlier_mask)[0], invert=True)
+            # pcd_inliers = pcd_guide.select_by_index(np.where(inliers)[0])
+            # pcd_outliers = pcd_guide.select_by_index(np.where(inliers)[0], invert=True)
             # pcd_inliers.paint_uniform_color([0.0, 1.0, 0.0])
             # pcd = pcd_inliers + pcd_outliers + pcd_surface
 
@@ -183,14 +169,13 @@ class AlignmentTask(luigi.Task):
                 m = cv2.resize(mask[i], (image_est.shape[2], image_est.shape[1]), interpolation=cv2.INTER_AREA)
                 mask_est.append(m)
             mask_est = (np.array(mask_est) > 127).astype(np.uint8)
-            # projection to surface
-            points, colors = utils.alignment.depth_to_surface(
+            # projection to thin plate spline
+            points, colors = utils.alignment.project_to_tps(
                 intrinsics_est,
                 extrinsics_est,
                 image_est,
                 mask_est,
-                ransac,
-                poly,
+                model,
                 max_depth=self.max_depth,
             )
             pcd_est = o3d.geometry.PointCloud()
@@ -201,18 +186,11 @@ class AlignmentTask(luigi.Task):
             # align global surface normal with y-axis and camera forward with z-axis
             w2c_mat = extrinsics_est[0]
             cam_up, cam_fwd, cam_pos = -w2c_mat[1, :3], w2c_mat[2, :3], -w2c_mat[:3, :3].T @ w2c_mat[:3, 3]
-            xcoef, zcoef = ransac.estimator_.coef_[0:2]  # extract x, z coefficients from quadric surface
-            normal = np.array([-xcoef, 1.0, -zcoef])  # quadric surface normal mean
-            normal = normal if np.dot(normal, cam_up) > 0.0 else -normal
-            normal = normal / np.linalg.norm(normal)
-            tangent = cam_fwd - np.dot(cam_fwd, normal) * normal
-            tangent = tangent / np.linalg.norm(tangent)
-            bitangent = np.cross(normal, tangent)
             # make transform matrix
             e2a_mat_t = np.eye(4)
             e2a_mat_t[:3, 3] = -cam_pos
             e2a_mat_r = np.eye(4)
-            e2a_mat_r[:3, :3] = np.vstack([bitangent, normal, tangent])
+            e2a_mat_r[:3, :3] = np.vstack([np.cross(cam_up, cam_fwd), cam_up, cam_fwd])
             e2a_mat = e2a_mat_r @ e2a_mat_t
 
             # write points as PLY format
