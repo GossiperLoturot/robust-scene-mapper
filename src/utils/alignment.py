@@ -15,7 +15,7 @@ import scipy.interpolate
 import context
 
 
-def undistort_image_dir(model_dir: str, image_dir: str, rgb: bool) -> np.ndarray:
+def undistort_image_dir(model_dir: str, image_dir: str, rgb: bool) -> tuple[np.ndarray, np.ndarray]:
     with tempfile.TemporaryDirectory() as temp_dir:
         undistort_dir = os.path.join(temp_dir, "undistort")
         os.makedirs(undistort_dir, exist_ok=True)
@@ -36,28 +36,37 @@ def undistort_image_dir(model_dir: str, image_dir: str, rgb: bool) -> np.ndarray
                 images.append(image)
         images = np.array(images)
 
+        # read intrinsics
+        model = pycolmap.Reconstruction(os.path.join(undistort_dir, "sparse"))
+        intrinsics = list[np.ndarray]()
+        for image_id in sorted(model.images):
+            image = model.image(image_id)
+            camera = model.camera(image.camera_id)
+            intrinsics.append(camera.calibration_matrix())
+        intrinsics = np.array(intrinsics)
+
         # cleanup
         shutil.rmtree(undistort_dir, ignore_errors=True)
 
-        return images
+        return images, intrinsics
 
 
 def align_path_from_extrinsics(
     extrinsics_target: np.ndarray,
     extrinsics_ref: np.ndarray,
-) -> tuple[evo.core.trajectory.PosePath3D, evo.core.trajectory.PosePath3D, np.ndarray, np.ndarray, float]:
+) -> tuple[evo.core.trajectory.PosePath3D, evo.core.trajectory.PosePath3D, float]:
     pose_ref = np.linalg.inv(extrinsics_ref)
     pose_target = np.linalg.inv(extrinsics_target)
     path_ref = evo.core.trajectory.PosePath3D(poses_se3=pose_ref)
     path_target = evo.core.trajectory.PosePath3D(poses_se3=pose_target)
-    rotate, translate, scale = path_target.align(path_ref, correct_scale=True)
-    return path_target, path_ref, rotate, translate, scale
+    _, _, scale = path_target.align(path_ref, correct_scale=True)
+    return path_target, path_ref, scale
 
 
 def plot_path(
     path: str,
     path_target: evo.core.trajectory.PosePath3D,
-    path_ref: evo.core.trajectory.PosePath3D
+    path_ref: evo.core.trajectory.PosePath3D,
 ):
     fig = plt.figure(figsize=(8, 8))
     ax = evo.tools.plot.prepare_axis(fig, plot_mode=evo.tools.plot.PlotMode.xyz)
@@ -99,25 +108,24 @@ def fit_to_tps(
 def project_to_tps(
     K: np.ndarray,
     ext_w2c: np.ndarray,
-    image: np.ndarray,
-    mask: np.ndarray,
+    images_rgb: np.ndarray,
+    masks_bool: np.ndarray,
     model: scipy.interpolate.RBFInterpolator,
     init_depth: float = 5.0,
     max_depth: float = 10.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     ctx = context.Context()
 
-    N, H, W, _ = image.shape
+    N, H, W, _ = images_rgb.shape
     us, vs = np.meshgrid(np.arange(W), np.arange(H))
     ones = np.ones_like(us)
     pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (H * W, 3)
 
     points_all, colors_all = [], []
     for i in rich.progress.track(range(N), total=N, description="project to tps", console=ctx.console):
-        valid = mask[i] > 0
-        if not np.any(valid):
+        if not np.any(masks_bool[i]):
             continue
-        valid_idx = np.flatnonzero(valid.reshape(-1))  # (H * W)
+        valid_idx = np.flatnonzero(masks_bool[i].reshape(-1))  # (H * W)
 
         K_inv = np.linalg.inv(K[i])  # (3, 3) intrinsics
         c2w = np.linalg.inv(ext_w2c[i])  # (4, 4) camera to world
@@ -133,11 +141,11 @@ def project_to_tps(
         assert isinstance(depth_opt, np.ndarray)
 
         pts_w = (camera_w[:, np.newaxis] + depth_opt[np.newaxis, :] * rays_w).T  # (M, 3) points
-        colors = image[i].reshape(-1, 3)[valid_idx]  # (M, 3) colors
+        colors = images_rgb[i].reshape(-1, 3)[valid_idx]  # (M, 3) colors
 
-        d_valid_idx = np.flatnonzero((depth_opt > 0.0) & (depth_opt < max_depth))
-        pts_w = pts_w[d_valid_idx]
-        colors = colors[d_valid_idx]
+        post_valid_idx = np.flatnonzero((depth_opt > 0.0) & (depth_opt < max_depth))
+        pts_w = pts_w[post_valid_idx]
+        colors = colors[post_valid_idx]
 
         points_all.append(pts_w)  # (M, 3)
         colors_all.append(colors)  # (M, 3)

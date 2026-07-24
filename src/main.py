@@ -32,7 +32,7 @@ class DispatchTask(luigi.WrapperTask):
     def requires(self):
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.alignment.AlignmentTask(
+            task = tasks.alignment.SurfaceTask(
                 input_path=input_path,
                 fps=self.fps,
                 width=self.width,
