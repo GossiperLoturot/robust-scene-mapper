@@ -48,18 +48,6 @@ PLANAR_CATEGORIES = [
     "road",
     "sidewalk",
 ]
-OBSTACLE_CATEGORIES = [
-    "road",
-    "sidewalk",
-    "building",
-    "wall",
-    "fence",
-    "pole",
-    "traffic light",
-    "traffic sign",
-    "vegetation",
-    "terrain",
-]
 
 
 @torch.inference_mode()

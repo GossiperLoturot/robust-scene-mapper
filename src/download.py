@@ -33,14 +33,6 @@ def main():
     transformers.Mask2FormerImageProcessor.from_pretrained("facebook/mask2former-swin-large-cityscapes-semantic")
     transformers.Mask2FormerForUniversalSegmentation.from_pretrained("facebook/mask2former-swin-large-cityscapes-semantic")
 
-    logger.info("download Grounding Dino weights")
-    transformers.GroundingDinoProcessor.from_pretrained("IDEA-Research/grounding-dino-base")
-    transformers.GroundingDinoForObjectDetection.from_pretrained("IDEA-Research/grounding-dino-base")
-
-    logger.info("download SAM2 weights")
-    transformers.Sam2Processor.from_pretrained("facebook/sam2.1-hiera-large")
-    transformers.Sam2Model.from_pretrained("facebook/sam2.1-hiera-large")
-
     logger.info("download Depth Anything 3 weights")
     with subprocess.Popen(
         ["uv", "run", "hf", "download", "depth-anything/DA3NESTED-GIANT-LARGE-1.1"], cwd="deps/depth-anything-3",

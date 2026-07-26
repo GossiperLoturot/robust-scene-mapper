@@ -1,0 +1,15 @@
+[package]
+name = "lifting-seg"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "lifting_seg"
+crate-type = ["cdylib"]
+
+[dependencies]
+bvh = "0.12"
+nalgebra = "0.34"
+numpy = { version = "0.28", features = ["nalgebra"] }
+pyo3 = { version = "0.28", features = ["extension-module"] }
+rayon = "1"

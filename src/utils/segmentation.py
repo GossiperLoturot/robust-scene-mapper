@@ -1,6 +1,5 @@
 import dataclasses
 import gc
-import pickle
 import os
 
 import cv2
@@ -9,7 +8,33 @@ import rich.progress
 import torch
 import transformers
 
+import lifting_seg
 import context
+
+
+ALL_CATEGORIES = [
+    "road",
+    "sidewalk",
+    "building",
+    "wall",
+    "fence",
+    "pole",
+    "traffic light",
+    "traffic sign",
+    "vegetation",
+    "terrain",
+    "sky",
+    "person",
+    "rider",
+    "car",
+    "truck",
+    "bus",
+    "train",
+    "motorcycle",
+    "bicycle"
+]
+HUES = np.linspace(0, 180, len(ALL_CATEGORIES), endpoint=False, dtype=np.uint8)
+COLORMAPS = np.array([cv2.cvtColor(np.array([[[hue, 255, 255]]], dtype=np.uint8), cv2.COLOR_HSV2RGB)[0, 0] for hue in HUES])
 
 
 @dataclasses.dataclass
@@ -26,117 +51,13 @@ class SegmentationResult:
 
 
 @torch.inference_mode()
-def segmentation(image_dir: str, output_dir: str, text: list[str]):
+def segmentation(image_dir: str, output_dir: str):
     ctx = context.Context()
-
-    def impl():
-        model_id = "IDEA-Research/grounding-dino-base"
-        gd_processor = transformers.GroundingDinoProcessor.from_pretrained(model_id)
-        gd_model = transformers.GroundingDinoForObjectDetection.from_pretrained(model_id, device_map="auto")
-
-        model_id = "facebook/sam2.1-hiera-large"
-        sam_processor = transformers.Sam2Processor.from_pretrained(model_id)
-        sam_model = transformers.Sam2Model.from_pretrained(model_id, device_map="auto")
-
-        filenames = os.listdir(image_dir)
-        for filename in rich.progress.track(filenames, description="Segmenting images...", total=len(filenames)):
-            basename, _ = os.path.splitext(filename)
-            image_path = os.path.join(image_dir, filename)
-
-            image = cv2.imread(image_path)
-            assert isinstance(image, np.ndarray)
-            w, h = image.shape[1], image.shape[0]
-
-            # open vocabrary object detection
-            inputs_od = gd_processor(images=image, text=[text], return_tensors="pt").to(gd_model.device)
-            outputs_od = gd_model(**inputs_od)
-            results_od = gd_processor.post_process_grounded_object_detection(
-                outputs_od,
-                inputs_od.input_ids,
-                threshold=0.2,
-                text_threshold=0.2,
-                target_sizes=[(h, w)]
-            )[0]
-
-            boxes = results_od["boxes"].cpu().numpy()
-            confidences = results_od["scores"].cpu().numpy().tolist()
-            class_names = results_od["labels"]
-
-            if len(boxes) == 0:
-                ctx.logger.warning(f"No objects detected: {filename}")
-                continue
-
-            # segmentation
-            inputs_seg = sam_processor(images=image, input_boxes=[boxes.tolist()], return_tensors="pt").to(sam_model.device)
-            outputs_seg = sam_model(**inputs_seg)
-            results_seg = sam_processor.post_process_masks(outputs_seg.pred_masks.cpu(), inputs_seg["original_sizes"])[0]
-
-            masks = results_seg[:, 0, :, :].numpy()
-
-            # save segmentation results
-            annotations = list[Annotation]()
-            for class_name, confidence, mask in zip(class_names, confidences, masks):
-                _, blob = cv2.imencode(".png", mask * np.uint8(255))  # boolean to uint8
-                annotations.append(Annotation(
-                    class_name=class_name,
-                    confidence=confidence,
-                    mask_blob=blob.tobytes(),
-                ))
-            segmentation_result = SegmentationResult(
-                basename=basename,
-                annotations=annotations,
-            )
-
-            output_path = os.path.join(output_dir, basename + ".pkl")
-            with open(output_path, "wb") as f:
-                pickle.dump(segmentation_result, f)
-
-    impl()
-    gc.collect()
-    torch.cuda.empty_cache()
-
-
-@torch.inference_mode()
-def refine_segmentation(image_dir: str, output_dir: str, text: list[str]):
-    ctx = context.Context()
-
-    all_categories = [
-        "road",
-        "sidewalk",
-        "building",
-        "wall",
-        "fence",
-        "pole",
-        "traffic light",
-        "traffic sign",
-        "vegetation",
-        "terrain",
-        "sky",
-        "person",
-        "rider",
-        "car",
-        "truck",
-        "bus",
-        "train",
-        "motorcycle",
-        "bicycle"
-    ]
-
-    num_colors = 32
-    hsv_colors = np.zeros((num_colors, 3))
-    hsv_colors[:, 0] = np.linspace(0, 179, num_colors)
-    hsv_colors[:, 1] = 200
-    hsv_colors[:, 2] = 255
-    rgb_colors = cv2.cvtColor(hsv_colors.reshape(1, -1, 3).astype(np.uint8), cv2.COLOR_HSV2RGB).reshape(-1, 3)
 
     def impl():
         model_id = "facebook/mask2former-swin-large-cityscapes-semantic"
         processor = transformers.Mask2FormerImageProcessor.from_pretrained(model_id)
         model = transformers.Mask2FormerForUniversalSegmentation.from_pretrained(model_id, device_map="auto")
-
-        model_id = "facebook/sam2.1-hiera-large"
-        seg_processor = transformers.Sam2Processor.from_pretrained(model_id)
-        seg_model = transformers.Sam2Model.from_pretrained(model_id, device_map="auto")
 
         filenames = os.listdir(image_dir)
         for filename in rich.progress.track(filenames, description="Segmenting images...", total=len(filenames), console=ctx.console):
@@ -155,50 +76,66 @@ def refine_segmentation(image_dir: str, output_dir: str, text: list[str]):
 
             seg = results.cpu().numpy()
 
-            # draw segmentation mask for debug
+            # draw segmentation mask
             overlay = np.zeros_like(image)
-            for id, cat in enumerate(all_categories):
-                if cat == "pole":
-                    overlay[seg == id] = [255, 255, 255]
-            debug_image = cv2.addWeighted(image, 0.6, overlay, 0.4, 0)
+            for id, cat in enumerate(ALL_CATEGORIES):
+                overlay[seg == id] = COLORMAPS[id]
 
             # write image
-            cv2.imwrite(os.path.join(output_dir, filename), cv2.cvtColor(debug_image, cv2.COLOR_RGB2BGR))
-
-            bboxes = []
-            for id, cat in enumerate(all_categories):
-                if cat == "pole":
-                    num_labels, _, stats, _ = cv2.connectedComponentsWithStats((seg == id).astype(np.uint8))
-                    for i in range(1, num_labels):
-                        x = int(stats[i, cv2.CC_STAT_LEFT])
-                        y = int(stats[i, cv2.CC_STAT_TOP])
-                        w = int(stats[i, cv2.CC_STAT_WIDTH])
-                        h = int(stats[i, cv2.CC_STAT_HEIGHT])
-                        if stats[i, cv2.CC_STAT_AREA] >= 32.0:
-                            bboxes.append([x, y, x + w, y + h])
-
-            if len(bboxes) == 0:
-                ctx.logger.warning(f"No objects detected: {filename}")
-                continue
-
-            # segmentation
-            inputs_seg = seg_processor(images=image, input_boxes=[bboxes], return_tensors="pt").to(seg_model.device)
-            outputs_seg = seg_model(**inputs_seg)
-            results_seg = seg_processor.post_process_masks(outputs_seg.pred_masks.cpu(), inputs_seg["original_sizes"])[0]
-
-            masks = results_seg[:, 0, :, :].numpy()
-
-            # draw segmentation mask for debug
-            overlay = np.zeros_like(image)
-            for i in range(masks.shape[0]):
-                mask = masks[i]
-                overlay[mask] = rgb_colors[i % len(rgb_colors)]
-            debug_image = cv2.addWeighted(image, 0.6, overlay, 0.4, 0)
-
-            # write image
-            cv2.imwrite(os.path.join(output_dir, f"seg_{filename}"), cv2.cvtColor(debug_image, cv2.COLOR_RGB2BGR))
-    ctx.logger.info(f"refining segmentation: {text}")
+            cv2.imwrite(os.path.join(output_dir, filename), cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
 
     impl()
     gc.collect()
     torch.cuda.empty_cache()
+
+
+def project_ray(
+    K: np.ndarray,
+    ext_w2c: np.ndarray,
+    seg_rgb: np.ndarray,
+    masks_bool: np.ndarray,
+    near_clip: float = 1.0,
+    far_clip: float = 10.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    ctx = context.Context()
+
+    N, H, W, _ = seg_rgb.shape
+    us, vs = np.meshgrid(np.arange(W), np.arange(H))
+    ones = np.ones_like(us)
+    pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (H * W, 3)
+
+    rays_all, feats_all = [], []
+    for i in rich.progress.track(range(N), total=N, description="project ray", console=ctx.console):
+        if not np.any(masks_bool[i]):
+            continue
+        valid_idx = np.flatnonzero(masks_bool[i].reshape(-1))  # (H * W)
+
+        K_inv = np.linalg.inv(K[i])  # (3, 3) intrinsics
+        c2w = np.linalg.inv(ext_w2c[i])  # (4, 4) camera to world
+
+        ray_c = K_inv @ pix[valid_idx].T  # (3, M) ray direction
+        camera_w, rays_w = c2w[:3, 3], c2w[:3, :3] @ ray_c  # (3, M) world camera position, (3, M) world ray direction
+        pts_w0 = (camera_w[:, np.newaxis] + near_clip * rays_w).T  # (M, 3) points
+        pts_w1 = (camera_w[:, np.newaxis] + far_clip * rays_w).T  # (M, 3) points
+        rays = np.stack([pts_w0, pts_w1], axis=1)  # (M, 2, 3) lines
+        feats = seg_rgb[i].reshape(-1, 3)[valid_idx]  # (M, 3) colors
+
+        rays_all.append(rays)  # (M, 2, 3)
+        feats_all.append(feats)  # (M, 3)
+
+    if len(rays_all) == 0:
+        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.float64)
+
+    return np.concatenate(rays_all, 0), np.concatenate(feats_all, 0)
+
+
+def intersection(
+    rays: np.ndarray,  # (M, 2, 3)
+    ray_feats: np.ndarray,  # (M, 3)
+    points: np.ndarray,  # (N, 3)
+    radius: float = 0.010,  # [m]
+) -> np.ndarray:
+    assert rays.ndim == 3 and rays.dtype == np.float64
+    assert ray_feats.ndim == 2 and ray_feats.dtype == np.float64
+    assert points.ndim == 2 and points.dtype == np.float64
+    return lifting_seg.intersection(rays, ray_feats, points, radius)

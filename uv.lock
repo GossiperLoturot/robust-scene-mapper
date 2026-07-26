@@ -873,6 +873,10 @@ wheels = [
 ]
 
 [[package]]
+name = "lifting-seg"
+source = { directory = "deps/lifting-seg" }
+
+[[package]]
 name = "lockfile"
 version = "0.12.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1996,6 +2000,7 @@ dependencies = [
     { name = "evo" },
     { name = "faiss-gpu" },
     { name = "kornia" },
+    { name = "lifting-seg" },
     { name = "luigi" },
     { name = "numpy" },
     { name = "open3d" },
@@ -2016,6 +2021,7 @@ requires-dist = [
     { name = "evo", specifier = ">=1.36.5" },
     { name = "faiss-gpu", specifier = ">=1.14.3" },
     { name = "kornia", specifier = ">=0.8.1" },
+    { name = "lifting-seg", directory = "deps/lifting-seg" },
     { name = "luigi", specifier = ">=3.8.1" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "open3d", specifier = ">=0.19.0" },

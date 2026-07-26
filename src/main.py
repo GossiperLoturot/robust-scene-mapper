@@ -9,7 +9,7 @@ import luigi
 import yaml
 
 import context
-import tasks.alignment
+import tasks.segmentation
 
 
 class DispatchTask(luigi.WrapperTask):
@@ -27,12 +27,13 @@ class DispatchTask(luigi.WrapperTask):
     highres_height: luigi.IntParameter = luigi.IntParameter()
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
-    downsample_res: luigi.FloatParameter = luigi.FloatParameter()
+    voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
+    kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self):
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.alignment.SurfaceTask(
+            task = tasks.segmentation.LiftingTask(
                 input_path=input_path,
                 fps=self.fps,
                 width=self.width,
@@ -47,7 +48,8 @@ class DispatchTask(luigi.WrapperTask):
                 highres_height=self.highres_height,
                 ransac_threshold=self.ransac_threshold,
                 max_depth=self.max_depth,
-                downsample_res=self.downsample_res,
+                voxel_downsample=self.voxel_downsample,
+                kernel_radius=self.kernel_radius,
             )
             all_tasks.append(task)
         return all_tasks

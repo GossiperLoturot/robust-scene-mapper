@@ -159,9 +159,9 @@ class SurfaceTask(luigi.Task):
     highres_width: luigi.IntParameter = luigi.IntParameter()
     highres_height: luigi.IntParameter = luigi.IntParameter()
 
-    ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
-    max_depth: luigi.FloatParameter = luigi.FloatParameter()
-    downsample_res: luigi.FloatParameter = luigi.FloatParameter()
+    ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()  # [0.0, 1.0]
+    max_depth: luigi.FloatParameter = luigi.FloatParameter()  # [m]
+    voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [0.0, 1.0]
 
     def requires(self):
         alignment = AlignmentTask(
@@ -241,6 +241,7 @@ class SurfaceTask(luigi.Task):
             pcd_ref.transform(b2a_mat)
 
             # projection to thin plate spline
+            images_rgb = images_rgb.astype(np.float64) / 255.0
             points, colors = utils.alignment.project_to_tps(
                 intrinsics,
                 extrinsics,
@@ -251,8 +252,10 @@ class SurfaceTask(luigi.Task):
             )
             pcd_surface = o3d.geometry.PointCloud()
             pcd_surface.points = o3d.utility.Vector3dVector(points)
-            pcd_surface.colors = o3d.utility.Vector3dVector(colors.astype(np.float64) / 255.0)
-            pcd_surface = pcd_surface.voxel_down_sample(voxel_size=self.downsample_res)
+            pcd_surface.colors = o3d.utility.Vector3dVector(colors)
+            bound = pcd_surface.get_max_bound() - pcd_surface.get_min_bound()
+            voxel_size = max(bound[0], bound[1], bound[2]) * self.voxel_downsample
+            pcd_surface = pcd_surface.voxel_down_sample(voxel_size)
 
             # write points as PLY format
             object_path = os.path.join(temp_dir, "object.ply")

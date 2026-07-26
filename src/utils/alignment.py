@@ -151,6 +151,6 @@ def project_to_tps(
         colors_all.append(colors)  # (M, 3)
 
     if len(points_all) == 0:
-        return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.uint8)
+        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.float64)
 
     return np.concatenate(points_all, 0), np.concatenate(colors_all, 0)
