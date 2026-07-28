@@ -45,10 +45,38 @@ class SegmentationTask(luigi.Task):
             [[video_sampling]] = self.input()
             image_dir = os.path.join(video_sampling.read(), "images")
 
+            semantic_seg_dir = os.path.join(temp_dir, "semantic_seg")
+            concept_seg_dir = os.path.join(temp_dir, "concept_seg")
             segmentation_dir = os.path.join(temp_dir, "segmentation")
+            os.makedirs(semantic_seg_dir, exist_ok=True)
+            os.makedirs(concept_seg_dir, exist_ok=True)
             os.makedirs(segmentation_dir, exist_ok=True)
 
-            utils.segmentation.segmentation(image_dir, segmentation_dir)
+            ctx.logger.info("running semantic segmentation")
+            num_semantic_seg = len(utils.segmentation.ALL_CATEGORIES)
+            utils.segmentation.semantic_segmentation(image_dir, semantic_seg_dir)
+
+            ctx.logger.info("running concept segmentation")
+            concepts = [
+                "lane markings",
+                "traffic sign",
+                "sidewalk",
+                "lane",
+            ]
+            num_concept_seg = len(concepts)
+            utils.segmentation.concept_segmentation(image_dir, concept_seg_dir, concepts)
+
+            ctx.logger.info("merging results")
+            utils.segmentation.merge_segmentation(
+                image_dir,
+                semantic_seg_dir,
+                num_semantic_seg,
+                concept_seg_dir,
+                num_concept_seg,
+                segmentation_dir
+            )
+            num_seg = num_semantic_seg + num_concept_seg
+            ctx.logger.info(f"segmentation completed: {num_seg} categories")
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
@@ -182,11 +210,13 @@ class LiftingTask(luigi.Task):
                 masks_bool,
             )
             xyz = np.asarray(pcd_input.points)
+            bound = pcd_input.get_max_bound() - pcd_input.get_min_bound()
+            kernel_radius = max(bound[0], bound[1], bound[2]) * self.kernel_radius
             xyz_feats = utils.segmentation.intersection(
                 rays.astype(np.float64),
                 ray_feats.astype(np.float64),
                 xyz.astype(np.float64),
-                self.kernel_radius,
+                kernel_radius,
             )
             pcd_seg = o3d.geometry.PointCloud()
             pcd_seg.points = o3d.utility.Vector3dVector(xyz)

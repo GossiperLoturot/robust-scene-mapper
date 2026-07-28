@@ -17,5 +17,5 @@ dispatch:
   highres_height: 720
   ransac_threshold: 0.200
   max_depth: 10.0
-  voxel_downsample: 0.001
-  kernel_radius: 0.010
+  voxel_downsample: 0.00025
+  kernel_radius: 0.0001
