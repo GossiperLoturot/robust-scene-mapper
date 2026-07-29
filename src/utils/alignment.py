@@ -105,7 +105,7 @@ def fit_to_tps(
     return best_model, best_inliers
 
 
-def project_to_tps(
+def project_points_to_tps(
     K: np.ndarray,
     ext_w2c: np.ndarray,
     images_rgb: np.ndarray,
@@ -122,7 +122,8 @@ def project_to_tps(
     pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (H * W, 3)
 
     points_all, colors_all = [], []
-    for i in rich.progress.track(range(N), total=N, description="project to tps", console=ctx.console):
+    ctx.logger.info(f"projecting points to thin-plate-spline with {N} frames...")
+    for i in rich.progress.track(range(N), total=N, console=ctx.console):
         if not np.any(masks_bool[i]):
             continue
         valid_idx = np.flatnonzero(masks_bool[i].reshape(-1))  # (H * W)
@@ -153,4 +154,50 @@ def project_to_tps(
     if len(points_all) == 0:
         return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.float64)
 
-    return np.concatenate(points_all, 0), np.concatenate(colors_all, 0)
+    return np.concat(points_all, 0), np.concat(colors_all, 0)
+
+
+def project_tracking_to_tps(
+    K: np.ndarray,
+    ext_w2c: np.ndarray,
+    centers_2d: list[np.ndarray],
+    model: scipy.interpolate.RBFInterpolator,
+    init_depth: float = 5.0,
+    max_depth: float = 10.0,
+) -> list[np.ndarray]:
+    ctx = context.Context()
+
+    N = len(centers_2d)
+
+    centers_3d = []
+    ctx.logger.info(f"projecting tracking to thin-plate-spline with {N} frames...")
+    for i in rich.progress.track(range(N), total=N, console=ctx.console):
+        if centers_2d[i].shape[0] == 0:
+            centers_3d.append(np.zeros((0, 3)))
+            continue
+
+        us, vs = centers_2d[i][:, 0], centers_2d[i][:, 1]
+        ones = np.ones_like(us)
+        centers_home = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (M, 3)
+
+        K_inv = np.linalg.inv(K[i])  # (3, 3) intrinsics
+        c2w = np.linalg.inv(ext_w2c[i])  # (4, 4) camera to world
+
+        rays = K_inv @ centers_home.T  # (3, M) ray direction
+        camera_w, rays_w = c2w[:3, 3], c2w[:3, :3] @ rays  # (3, M) world camera position, (3, M) world ray direction
+
+        depth_init = np.ones(rays_w.shape[1]) * init_depth  # (M,) initial depth
+        def obj_fn(depth: np.ndarray) -> np.ndarray:
+            xyz = (camera_w[:, np.newaxis] + depth[np.newaxis, :] * rays_w).T
+            return xyz[:, 1] - model(xyz[:, [0, 2]])
+        depth_opt = scipy.optimize.newton(obj_fn, depth_init)
+        assert isinstance(depth_opt, np.ndarray)
+
+        centers_w = (camera_w[:, np.newaxis] + depth_opt[np.newaxis, :] * rays_w).T  # (M, 3) centers
+
+        post_valid_idx = np.flatnonzero((depth_opt > 0.0) & (depth_opt < max_depth))
+        centers_w = centers_w[post_valid_idx]
+
+        centers_3d.append(centers_w)  # (M, 3)
+
+    return centers_3d

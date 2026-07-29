@@ -164,6 +164,20 @@ class SurfaceTask(luigi.Task):
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [0.0, 1.0]
 
     def requires(self):
+        tracking = tasks.object_masking.TrackingTask(
+            input_path=self.input_path,
+            fps=self.fps,
+            width=self.width,
+            height=self.height,
+            max_keypoints=self.max_keypoints,
+            width_confidence=self.width_confidence,
+            depth_confidence=self.depth_confidence,
+            init_frame_width=self.init_frame_width,
+            init_frame_height=self.init_frame_height,
+            init_focal_length=self.init_focal_length,
+            highres_width=self.highres_width,
+            highres_height=self.highres_height,
+        )
         alignment = AlignmentTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -206,7 +220,7 @@ class SurfaceTask(luigi.Task):
             highres_height=self.highres_height,
             mask_categories=tuple(utils.object_masking.STATIC_CATEGORIES),
         )
-        return [alignment, stereo_fusion_guide, stereo_fusion]
+        return [tracking, alignment, stereo_fusion_guide, stereo_fusion]
 
     def output(self):
         ctx = context.Context()
@@ -215,7 +229,8 @@ class SurfaceTask(luigi.Task):
     def run(self):
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
-            [[alignment], [stereo_fusion_guide], [stereo_fusion]] = self.input()
+            [[tracking], [alignment], [stereo_fusion_guide], [stereo_fusion]] = self.input()
+            tracking_path = os.path.join(tracking.read(), "tracking.npz")
             alignment_path = os.path.join(alignment.read(), "alignment.npz")
             fused_guide_path = os.path.join(stereo_fusion_guide.read(), "fused.ply")
             fused_path = os.path.join(stereo_fusion.read(), "fused.ply")
@@ -227,6 +242,29 @@ class SurfaceTask(luigi.Task):
             extrinsics = alignment_result["extrinsics"]
             images_rgb = alignment_result["images_rgb"]
             masks_bool = alignment_result["masks_bool"]
+
+            # process tracking
+            width, height = images_rgb.shape[2], images_rgb.shape[1]
+            tracking_pickle = np.load(tracking_path, allow_pickle=True)
+            all_centers, all_labels = [], []
+            for i, results in enumerate(tracking_pickle["all_results"]):
+                boxes = results["boxes"]
+                labels = results["labels"]
+                available_centers, available_labels = [], []
+                for j in range(len(boxes)):
+                    box = boxes[j]
+                    label = labels[j]
+                    if label not in utils.object_masking.COCO_RU_CATEGORIES:  # extract road users
+                        continue
+                    bottom_center = np.array([(box[0] + box[2]) * 0.5, box[3]])
+                    if bottom_center[1] > utils.object_masking.EGO_VEHICLE_HLINE:  # ignore ego-vehicle
+                        continue
+                    bottom_center *= np.array([width, height])  # normalize to undistored pixel coordinates
+                    available_centers.append(bottom_center)
+                    available_labels.append(label)
+                all_centers.append(np.array(available_centers).reshape(-1, 2))  # (N, 2)
+                all_labels.append(available_labels)
+            ctx.logger.info(f"tracking points: {sum([len(c) for c in all_centers])}")
 
             # detect thin plate spline
             pcd_guide = o3d.io.read_point_cloud(fused_guide_path)
@@ -240,9 +278,9 @@ class SurfaceTask(luigi.Task):
             pcd_ref = o3d.io.read_point_cloud(fused_path)
             pcd_ref.transform(b2a_mat)
 
-            # projection to thin plate spline
+            # project points to thin-plate-spline
             images_rgb = images_rgb.astype(np.float64) / 255.0
-            points, colors = utils.alignment.project_to_tps(
+            points, colors = utils.alignment.project_points_to_tps(
                 intrinsics,
                 extrinsics,
                 images_rgb,
@@ -257,11 +295,28 @@ class SurfaceTask(luigi.Task):
             voxel_size = max(bound[0], bound[1], bound[2]) * self.voxel_downsample
             pcd_surface = pcd_surface.voxel_down_sample(voxel_size)
 
+            # project trackings to thin-plate-spline
+            all_centers = utils.alignment.project_tracking_to_tps(
+                intrinsics,
+                extrinsics,
+                all_centers,
+                model,
+                max_depth=self.max_depth,
+            )
+            all_results = []
+            for centers, labels in zip(all_centers, all_labels):
+                all_results.append({ "centers": centers, "labels": labels })
+
             # write points as PLY format
             object_path = os.path.join(temp_dir, "object.ply")
             pcd = pcd_surface + pcd_ref
             o3d.io.write_point_cloud(object_path, pcd, write_ascii=False, compressed=True)
 
+            # write points as npz format
+            tracking_path = os.path.join(temp_dir, "tracking.npz")
+            np.savez_compressed(tracking_path, all_results=all_results)
+
             ctx.logger.info("writing output to database")
             [output] = self.output()
             shutil.move(object_path, output.open())
+            shutil.move(tracking_path, output.open())

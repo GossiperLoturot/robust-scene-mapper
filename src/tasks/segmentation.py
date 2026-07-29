@@ -45,7 +45,6 @@ class SegmentationTask(luigi.Task):
             [[video_sampling]] = self.input()
             image_dir = os.path.join(video_sampling.read(), "images")
 
-            object_detection_path = os.path.join(temp_dir, "object_detection.npz")
             semantic_seg_dir = os.path.join(temp_dir, "semantic_seg")
             concept_seg_dir = os.path.join(temp_dir, "concept_seg")
             segmentation_dir = os.path.join(temp_dir, "segmentation")
@@ -53,22 +52,13 @@ class SegmentationTask(luigi.Task):
             os.makedirs(concept_seg_dir, exist_ok=True)
             os.makedirs(segmentation_dir, exist_ok=True)
 
-            ctx.logger.info("running object detection")
-            utils.segmentation.object_detection(image_dir, object_detection_path)
-
             ctx.logger.info("running semantic segmentation")
-            num_semantic_seg = len(utils.segmentation.ALL_CATEGORIES)
+            num_semantic_seg = len(utils.segmentation.CITYSCAPE_CATEGORIES)
             utils.segmentation.semantic_segmentation(image_dir, semantic_seg_dir)
 
             ctx.logger.info("running concept segmentation")
-            concepts = [
-                "lane markings",
-                "traffic sign",
-                "sidewalk",
-                "lane",
-            ]
-            num_concept_seg = len(concepts)
-            utils.segmentation.concept_segmentation(image_dir, concept_seg_dir, concepts)
+            num_concept_seg = len(utils.segmentation.CONCEPT_CATEGORIES)
+            utils.segmentation.concept_segmentation(image_dir, concept_seg_dir, utils.segmentation.CONCEPT_CATEGORIES)
 
             ctx.logger.info("merging results")
             utils.segmentation.merge_segmentation(
@@ -84,7 +74,6 @@ class SegmentationTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            shutil.move(object_detection_path, output.open())
             shutil.move(segmentation_dir, output.open())
 
 
@@ -206,26 +195,27 @@ class LiftingTask(luigi.Task):
 
             pcd_input = o3d.io.read_point_cloud(surface_path)
 
-            # project rays | lines: (N, 2, 3), colors: (N, 3)
+            # project 2D segmentation to 3D point space
             segs_rgb = segs_rgb.astype(np.float64) / 255.0
             rays, ray_feats = utils.segmentation.project_ray(
                 intrinsics,
                 extrinsics,
                 segs_rgb,
                 masks_bool,
-            )
+            )  # rays (N, 2, 3), ray_feats: (N, F)
             xyz = np.asarray(pcd_input.points)
             bound = pcd_input.get_max_bound() - pcd_input.get_min_bound()
             kernel_radius = max(bound[0], bound[1], bound[2]) * self.kernel_radius
-            xyz_feats = utils.segmentation.intersection(
+            xyz_rgb = utils.segmentation.intersection(
                 rays.astype(np.float64),
                 ray_feats.astype(np.float64),
                 xyz.astype(np.float64),
                 kernel_radius,
             )
+
             pcd_seg = o3d.geometry.PointCloud()
             pcd_seg.points = o3d.utility.Vector3dVector(xyz)
-            pcd_seg.colors = o3d.utility.Vector3dVector(xyz_feats)
+            pcd_seg.colors = o3d.utility.Vector3dVector(xyz_rgb)
 
             # write points as PLY format
             object_path = os.path.join(temp_dir, "object.ply")

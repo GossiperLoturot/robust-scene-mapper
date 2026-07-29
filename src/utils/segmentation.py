@@ -12,7 +12,7 @@ import lifting_seg
 import context
 
 
-ALL_CATEGORIES = [
+CITYSCAPE_CATEGORIES = [
     "road",
     "sidewalk",
     "building",
@@ -35,6 +35,14 @@ ALL_CATEGORIES = [
 ]
 
 
+CONCEPT_CATEGORIES = [
+    "lane markings",
+    "traffic sign",
+    "sidewalk",
+    "lane",
+]
+
+
 @dataclasses.dataclass
 class Annotation:
     class_name: str
@@ -48,46 +56,24 @@ class SegmentationResult:
     annotations: list[Annotation]
 
 
-@torch.inference_mode()
-def object_detection(image_dir: str, output_path: str):
-    ctx = context.Context()
+# [N, F] -> [N, 3]
+def sparse2rgb_via_hue(sparse: np.ndarray, num_feats: int) -> np.ndarray:
+    idx = np.argmax(sparse, axis=1)
+    hues = np.linspace(0, 180, num_feats, endpoint=False, dtype=np.uint8)
+    palette = np.array([cv2.cvtColor(np.array([[[hue, 255, 255]]], dtype=np.uint8), cv2.COLOR_HSV2RGB)[0, 0] for hue in hues])
+    rgb = palette[idx]
+    rgb[sparse.max(axis=1) == 0.0] = [0, 0, 0]
+    return rgb
 
-    def impl():
-        model_id = "roboflow/rf-detr-large"
-        processor = transformers.RfDetrImageProcessor.from_pretrained(model_id, device_map="auto")
-        model = transformers.RfDetrForObjectDetection.from_pretrained(model_id)
 
-        results = {}
-        filenames = os.listdir(image_dir)
-        for filename in rich.progress.track(filenames, total=len(filenames), console=ctx.console):
-            image_path = os.path.join(image_dir, filename)
-            image = cv2.imread(image_path)
-            assert isinstance(image, np.ndarray), f"Failed to read image: {filename}"
-
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            assert isinstance(image, np.ndarray)
-            w, h = image.shape[1], image.shape[0]
-
-            inputs = processor(images=image, return_tensors="pt").to(model.device)
-            outputs = model(**inputs)
-            results = processor.post_process_object_detection(
-                outputs,
-                threshold=0.3,
-                target_sizes=torch.tensor([(h, w)]),
-            )[0]
-
-            boxes, label_names = [], []
-            for label, box in zip(results["labels"], results["boxes"]):
-                box = box.cpu().numpy().astype(np.int32)
-                label_name = model.config.id2label[label.item()]
-                boxes.append(box.tolist())
-                label_names.append(label_name)
-            results[filename] = { "boxes": boxes, "label_names": label_names }
-        np.savez(output_path, results=results)
-
-    impl()
-    gc.collect()
-    torch.cuda.empty_cache()
+# [N, 3] -> [N, F]
+def rgb2sparse_via_hue(rgb: np.ndarray, num_feats: int) -> np.ndarray:
+    hsv = cv2.cvtColor(rgb.reshape(-1, 1, 3), cv2.COLOR_RGB2HSV).reshape(-1, 3)
+    idx = np.round(hsv[:, 0] / 180.0 * num_feats)
+    sparse = np.zeros((hsv.shape[0], num_feats), dtype=np.float64)
+    for i in range(num_feats):
+        sparse[(hsv[:, 2] > 127) & (idx == i), i] = 1.0
+    return sparse
 
 
 @torch.inference_mode()
@@ -114,11 +100,11 @@ def semantic_segmentation(image_dir: str, output_dir: str):
             results = processor.post_process_semantic_segmentation(outputs, target_sizes=[(h, w)])[0]
 
             seg = results.cpu().numpy()
-            num_feats = len(ALL_CATEGORIES)
+            num_feats = len(CITYSCAPE_CATEGORIES)
             hues = np.linspace(0, 180, num_feats, endpoint=False, dtype=np.uint8)
             palette = np.array([cv2.cvtColor(np.array([[[hue, 255, 255]]], dtype=np.uint8), cv2.COLOR_HSV2RGB)[0, 0] for hue in hues])
             seg_rgb = np.zeros_like(image)
-            for id, _ in enumerate(ALL_CATEGORIES):
+            for id, _ in enumerate(CITYSCAPE_CATEGORIES):
                 seg_rgb[seg == id] = palette[id]
 
             # write image
@@ -248,14 +234,14 @@ def merge_segmentation(
 def project_ray(
     K: np.ndarray,
     ext_w2c: np.ndarray,
-    seg_rgb: np.ndarray,
+    seg_feats: np.ndarray,
     masks_bool: np.ndarray,
     near_clip: float = 1.0,
     far_clip: float = 10.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     ctx = context.Context()
 
-    N, H, W, _ = seg_rgb.shape
+    N, H, W, F = seg_feats.shape
     us, vs = np.meshgrid(np.arange(W), np.arange(H))
     ones = np.ones_like(us)
     pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (H * W, 3)
@@ -274,20 +260,20 @@ def project_ray(
         pts_w0 = (camera_w[:, np.newaxis] + near_clip * rays_w).T  # (M, 3) points
         pts_w1 = (camera_w[:, np.newaxis] + far_clip * rays_w).T  # (M, 3) points
         rays = np.stack([pts_w0, pts_w1], axis=1)  # (M, 2, 3) lines
-        feats = seg_rgb[i].reshape(-1, 3)[valid_idx]  # (M, 3) colors
+        feats = seg_feats[i].reshape(-1, F)[valid_idx]  # (M, F) colors
 
         rays_all.append(rays)  # (M, 2, 3)
-        feats_all.append(feats)  # (M, 3)
+        feats_all.append(feats)  # (M, F)
 
     if len(rays_all) == 0:
-        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, 3), dtype=np.float64)
+        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, F), dtype=np.float64)
 
-    return np.concatenate(rays_all, 0), np.concatenate(feats_all, 0)
+    return np.concat(rays_all, 0), np.concat(feats_all, 0)
 
 
 def intersection(
     rays: np.ndarray,  # (M, 2, 3)
-    ray_feats: np.ndarray,  # (M, 3)
+    ray_feats: np.ndarray,  # (M, F)
     points: np.ndarray,  # (N, 3)
     radius: float = 0.010,  # [m]
 ) -> np.ndarray:
