@@ -49,6 +49,48 @@ class SegmentationResult:
 
 
 @torch.inference_mode()
+def object_detection(image_dir: str, output_path: str):
+    ctx = context.Context()
+
+    def impl():
+        model_id = "roboflow/rf-detr-large"
+        processor = transformers.RfDetrImageProcessor.from_pretrained(model_id, device_map="auto")
+        model = transformers.RfDetrForObjectDetection.from_pretrained(model_id)
+
+        results = {}
+        filenames = os.listdir(image_dir)
+        for filename in rich.progress.track(filenames, total=len(filenames), console=ctx.console):
+            image_path = os.path.join(image_dir, filename)
+            image = cv2.imread(image_path)
+            assert isinstance(image, np.ndarray), f"Failed to read image: {filename}"
+
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            assert isinstance(image, np.ndarray)
+            w, h = image.shape[1], image.shape[0]
+
+            inputs = processor(images=image, return_tensors="pt").to(model.device)
+            outputs = model(**inputs)
+            results = processor.post_process_object_detection(
+                outputs,
+                threshold=0.3,
+                target_sizes=torch.tensor([(h, w)]),
+            )[0]
+
+            boxes, label_names = [], []
+            for label, box in zip(results["labels"], results["boxes"]):
+                box = box.cpu().numpy().astype(np.int32)
+                label_name = model.config.id2label[label.item()]
+                boxes.append(box.tolist())
+                label_names.append(label_name)
+            results[filename] = { "boxes": boxes, "label_names": label_names }
+        np.savez(output_path, results=results)
+
+    impl()
+    gc.collect()
+    torch.cuda.empty_cache()
+
+
+@torch.inference_mode()
 def semantic_segmentation(image_dir: str, output_dir: str):
     ctx = context.Context()
 
@@ -67,14 +109,11 @@ def semantic_segmentation(image_dir: str, output_dir: str):
             assert isinstance(image, np.ndarray)
             w, h = image.shape[1], image.shape[0]
 
-            # open vocabrary object detection
             inputs = processor(image, return_tensors="pt").to(model.device)
             outputs = model(**inputs)
             results = processor.post_process_semantic_segmentation(outputs, target_sizes=[(h, w)])[0]
 
             seg = results.cpu().numpy()
-
-            # draw segmentation mask
             num_feats = len(ALL_CATEGORIES)
             hues = np.linspace(0, 180, num_feats, endpoint=False, dtype=np.uint8)
             palette = np.array([cv2.cvtColor(np.array([[[hue, 255, 255]]], dtype=np.uint8), cv2.COLOR_HSV2RGB)[0, 0] for hue in hues])

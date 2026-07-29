@@ -1,9 +1,9 @@
 global:
-  database_dir: "tasks"
+  database_dir: "/mnt/d/study-2025/tasks/"
   retry_count: 8
 
 dispatch:
-  input_dir: "inputs"
+  input_dir: "/mnt/d/study-2025/video-internet/"
   fps: 8
   width: 512
   height: 288

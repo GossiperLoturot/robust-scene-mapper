@@ -45,12 +45,16 @@ class SegmentationTask(luigi.Task):
             [[video_sampling]] = self.input()
             image_dir = os.path.join(video_sampling.read(), "images")
 
+            object_detection_path = os.path.join(temp_dir, "object_detection.npz")
             semantic_seg_dir = os.path.join(temp_dir, "semantic_seg")
             concept_seg_dir = os.path.join(temp_dir, "concept_seg")
             segmentation_dir = os.path.join(temp_dir, "segmentation")
             os.makedirs(semantic_seg_dir, exist_ok=True)
             os.makedirs(concept_seg_dir, exist_ok=True)
             os.makedirs(segmentation_dir, exist_ok=True)
+
+            ctx.logger.info("running object detection")
+            utils.segmentation.object_detection(image_dir, object_detection_path)
 
             ctx.logger.info("running semantic segmentation")
             num_semantic_seg = len(utils.segmentation.ALL_CATEGORIES)
@@ -80,6 +84,7 @@ class SegmentationTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            shutil.move(object_detection_path, output.open())
             shutil.move(segmentation_dir, output.open())
 
 

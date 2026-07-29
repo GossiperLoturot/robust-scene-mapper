@@ -37,6 +37,10 @@ def main():
     transformers.Sam3Model.from_pretrained("facebook/sam3")
     transformers.Sam3Processor.from_pretrained("facebook/sam3")
 
+    logger.info("download RF-DETR weights")
+    transformers.RfDetrModel.from_pretrained("roboflow/rf-detr-large")
+    transformers.RfDetrImageProcessor.from_pretrained("roboflow/rf-detr-large", device_map="auto")
+
     logger.info("download Depth Anything 3 weights")
     with subprocess.Popen(
         ["uv", "run", "hf", "download", "depth-anything/DA3NESTED-GIANT-LARGE-1.1"], cwd="deps/depth-anything-3",
