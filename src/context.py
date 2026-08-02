@@ -12,6 +12,7 @@ class Context:
     logger: logging.Logger
 
     database_dir: str
+    export_dir: str
     retry_count: int
 
     def __new__(cls):

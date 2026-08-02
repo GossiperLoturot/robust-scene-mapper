@@ -94,7 +94,7 @@ class LiftingTask(luigi.Task):
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
 
-    kernel_radius: luigi.FloatParameter = luigi.FloatParameter()  # [m]
+    kernel_radius: luigi.FloatParameter = luigi.FloatParameter()  # [0, 1]
 
     def requires(self):
         segmentation = SegmentationTask(

@@ -9,7 +9,7 @@ import luigi
 import yaml
 
 import context
-import tasks.segmentation
+import tasks.merge
 
 
 class DispatchTask(luigi.WrapperTask):
@@ -33,7 +33,7 @@ class DispatchTask(luigi.WrapperTask):
     def requires(self):
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.segmentation.LiftingTask(
+            task = tasks.merge.MergeTask(
                 input_path=input_path,
                 fps=self.fps,
                 width=self.width,
@@ -65,6 +65,7 @@ if __name__ == "__main__":
 
     # set database from config
     ctx.database_dir = config["global"]["database_dir"]
+    ctx.export_dir = config["global"]["export_dir"]
     ctx.retry_count = config["global"]["retry_count"]
 
     try:

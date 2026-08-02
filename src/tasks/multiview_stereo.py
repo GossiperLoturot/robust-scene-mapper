@@ -54,7 +54,7 @@ class PatchMatchStereoTask(luigi.Task):
 
     def output(self):
         ctx = context.Context()
-        return [utils.task.FsTarget(ctx.database_dir, self)]
+        return [utils.task.FsArchiveTarget(ctx.database_dir, self)]
 
     def run(self):
         ctx = context.Context()
@@ -78,7 +78,8 @@ class PatchMatchStereoTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            shutil.move(workspace_dir, output.open())
+            with output.open() as archive:
+                archive.add(workspace_dir, arcname="dense")
 
 
 class StereoFusionTask(luigi.Task):
@@ -132,7 +133,9 @@ class StereoFusionTask(luigi.Task):
         with tempfile.TemporaryDirectory() as temp_dir:
             [[object_masking], [patch_match_stereo]] = self.input()
             mask_dir = os.path.join(object_masking.read(), "masks")
-            workspace_dir = os.path.join(patch_match_stereo.read(), "dense")
+            with patch_match_stereo.read() as archive:
+                archive.extractall(temp_dir)
+            workspace_dir = os.path.join(temp_dir, "dense")
 
             model_dir = os.path.join(workspace_dir, "sparse")
 
