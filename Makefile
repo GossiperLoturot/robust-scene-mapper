@@ -5,8 +5,6 @@ build:
 	@uv sync
 	@echo "installing dependencies"
 	@cd deps/depth-anything-3 && uv sync
-	@echo "build cubic-segmentation"
-	@cd deps/cubic-segmentation && cargo build --release
 
 check:
 	@echo "running ruff check"

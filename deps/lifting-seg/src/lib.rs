@@ -20,11 +20,10 @@ mod lifting_seg {
         let num_rays = rays_view.shape()[0];
         let num_verts = verts_view.shape()[0];
 
-        let mut vert_feats = numpy::ndarray::Array2::<f64>::zeros((num_verts, 3));
+        let num_feats = ray_feats_view.shape()[1];
+        let mut vert_feats = numpy::ndarray::Array2::<f64>::zeros((num_verts, num_feats));
 
         py.detach(|| {
-            let num_feats = ray_feats_view.shape()[1];
-
             let rays = (0..num_rays)
                 .map(|i| Ray {
                     org: nalgebra::Point3::new(rays_view[[i, 0, 0]], rays_view[[i, 0, 1]], rays_view[[i, 0, 2]]),

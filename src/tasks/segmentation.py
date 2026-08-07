@@ -64,9 +64,7 @@ class SegmentationTask(luigi.Task):
             utils.segmentation.merge_segmentation(
                 image_dir,
                 semantic_seg_dir,
-                num_semantic_seg,
                 concept_seg_dir,
-                num_concept_seg,
                 segmentation_dir
             )
             num_seg = num_semantic_seg + num_concept_seg
@@ -168,59 +166,67 @@ class LiftingTask(luigi.Task):
             surface_path = os.path.join(surface.read(), "object.ply")
 
             # undistort images using COLMAP
-            lowres_segmentation_dir = os.path.join(temp_dir, "segmentation")
             lowres_mask_dir = os.path.join(temp_dir, "masks")
-            os.makedirs(lowres_segmentation_dir, exist_ok=True)
             os.makedirs(lowres_mask_dir, exist_ok=True)
             for filename in os.listdir(segmentation_dir):
-                src_seg_path = os.path.join(segmentation_dir, filename)
                 src_msk_path = os.path.join(mask_dir, filename)
-                src_seg, src_msk = cv2.imread(src_seg_path), cv2.imread(src_msk_path)
-                assert isinstance(src_seg, np.ndarray) and isinstance(src_msk, np.ndarray)
-
-                dst_seg = cv2.resize(src_seg, (self.width, self.height), interpolation=cv2.INTER_AREA)
+                src_msk = cv2.imread(src_msk_path, cv2.IMREAD_GRAYSCALE)
+                assert isinstance(src_msk, np.ndarray)
                 dst_msk = cv2.resize(src_msk, (self.width, self.height), interpolation=cv2.INTER_AREA)
-
-                dst_seg_path = os.path.join(lowres_segmentation_dir, filename)
                 dst_msk_path = os.path.join(lowres_mask_dir, filename)
-                cv2.imwrite(dst_seg_path, dst_seg)
                 cv2.imwrite(dst_msk_path, dst_msk)
-            segs_rgb, intrinsics = utils.alignment.undistort_image_dir(model_dir, lowres_segmentation_dir, rgb=True)
-            masks_gray, _ = utils.alignment.undistort_image_dir(model_dir, lowres_mask_dir, rgb=False)
+            masks_gray, intrinsics = utils.alignment.undistort_image_dir(model_dir, lowres_mask_dir, rgb=False)
             masks_bool = masks_gray > 127
+
+            # undistort images using COLMAP
+            seg_ids = np.zeros_like(masks_bool, dtype=np.uint8)
+            for i, label in enumerate(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES):
+                lowres_segmentation_dir = os.path.join(temp_dir, f"segmentation_{label}")
+                os.makedirs(lowres_segmentation_dir, exist_ok=True)
+                for filename in os.listdir(segmentation_dir):
+                    src_seg_path = os.path.join(segmentation_dir, filename)
+                    src_seg = cv2.imread(src_seg_path, cv2.IMREAD_GRAYSCALE)
+                    assert isinstance(src_seg, np.ndarray)
+                    src_seg = (src_seg == i).astype(np.uint8) * 255
+                    dst_seg = cv2.resize(src_seg, (self.width, self.height), interpolation=cv2.INTER_AREA)
+                    dst_seg_path = os.path.join(lowres_segmentation_dir, filename)
+                    cv2.imwrite(dst_seg_path, dst_seg)
+                seg_gray, _ = utils.alignment.undistort_image_dir(model_dir, lowres_segmentation_dir, rgb=False)
+                seg_ids[seg_gray > 127] = i
+            ctx.logger.info(f"seg ids {seg_ids.shape}")
 
             # extract estimated model extrinsics
             alignment_result = np.load(alignment_path)
             extrinsics = alignment_result["extrinsics"]
 
-            pcd_input = o3d.io.read_point_cloud(surface_path)
-
             # project 2D segmentation to 3D point space
-            segs_rgb = segs_rgb.astype(np.float64) / 255.0
+            num_frames, height, width = seg_ids.shape
+            num_feats = len(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES)
+            segs_feats = np.zeros((num_frames, height, width, num_feats), dtype=np.float64)
+            for i in range(num_feats):
+                segs_feats[seg_ids == i, i] = 1.0
             rays, ray_feats = utils.segmentation.project_ray(
                 intrinsics,
                 extrinsics,
-                segs_rgb,
+                segs_feats,
                 masks_bool,
             )  # rays (N, 2, 3), ray_feats: (N, F)
+            pcd_input = o3d.io.read_point_cloud(surface_path)
             xyz = np.asarray(pcd_input.points)
             bound = pcd_input.get_max_bound() - pcd_input.get_min_bound()
             kernel_radius = max(bound[0], bound[1], bound[2]) * self.kernel_radius
-            xyz_rgb = utils.segmentation.intersection(
+            xyz_feats = utils.segmentation.intersection(
                 rays.astype(np.float64),
                 ray_feats.astype(np.float64),
                 xyz.astype(np.float64),
                 kernel_radius,
             )
+            ctx.logger.info(f"ray feats {xyz_feats.shape}")
 
-            pcd_seg = o3d.geometry.PointCloud()
-            pcd_seg.points = o3d.utility.Vector3dVector(xyz)
-            pcd_seg.colors = o3d.utility.Vector3dVector(xyz_rgb)
-
-            # write points as PLY format
-            object_path = os.path.join(temp_dir, "object.ply")
-            o3d.io.write_point_cloud(object_path, pcd_seg, write_ascii=False, compressed=True)
+            # write points as npz format
+            xyz_feats_path = os.path.join(temp_dir, "xyz_feats.npz")
+            np.savez_compressed(xyz_feats_path, feats=xyz_feats)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
-            shutil.move(object_path, output.open())
+            shutil.move(xyz_feats_path, output.open())

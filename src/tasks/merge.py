@@ -1,6 +1,5 @@
 import os
 
-import cv2
 import h5py
 import luigi
 import numpy as np
@@ -99,54 +98,52 @@ class MergeTask(luigi.Task):
         surface_path = os.path.join(surface.read(), "object.ply")
         tracking_path = os.path.join(surface.read(), "tracking.npz")
         alignment_path = os.path.join(alignment.read(), "alignment.npz")
-        lifting_path = os.path.join(lifting.read(), "object.ply")
+        lifting_path = os.path.join(lifting.read(), "xyz_feats.npz")
 
-        ego_centers = []
+        ego_frames, ego_xyz = [], []
         alignment_result = np.load(alignment_path)
         extrinsics = alignment_result["extrinsics"]
         for i in range(len(extrinsics)):
-            position = np.linalg.inv(extrinsics[i])[:3, 3]
-            ego_centers.append(position)
-        ego_centers = np.array(ego_centers, dtype=np.float64)
+            xyz = np.linalg.inv(extrinsics[i])[:3, 3]
+            ego_xyz.append(xyz)
+        ego_frames = np.arange(len(ego_xyz), dtype=np.int32)
+        ego_xyz = np.array(ego_xyz, dtype=np.float32)
+        ego_images = np.array(alignment_result["images_rgb"], dtype=np.uint8)
 
-        alt_frames, alt_labels, alt_centers = [], [], []
+        alt_frames, alt_xyz, alt_labels = [], [], []
         tracking = np.load(tracking_path, allow_pickle=True)
         for i, results in enumerate(tracking["all_results"]):
-            labels = results["labels"]
-            position = results["centers"]
+            xyz, labels = results["centers"], results["labels"]
             alt_frames.append(i)
+            alt_xyz.append(xyz)
             alt_labels.append(labels)
-            alt_centers.append(position)
-        alt_frames = np.array(alt_frames, dtype=np.int64)
+        alt_frames = np.array(alt_frames, dtype=np.int32)
+        alt_xyz = np.concat(alt_xyz, axis=0).astype(np.float32)
         alt_labels = np.concat(alt_labels, axis=0, dtype="T")
-        alt_centers = np.concat(alt_centers, axis=0, dtype=np.float64)
 
-        pcd_colored = o3d.io.read_point_cloud(surface_path)
-        pcd_semantic = o3d.io.read_point_cloud(lifting_path)
-        xyz = np.asarray(pcd_colored.points, dtype=np.float64)
-        rgb = np.asarray(pcd_colored.colors, dtype=np.float64)
-        semantic = np.asarray(pcd_semantic.colors, dtype=np.float64)
+        pcd = o3d.io.read_point_cloud(surface_path)
+        xyz = np.asarray(pcd.points, dtype=np.float32)
+        rgb = np.asarray(pcd.colors, dtype=np.float32)
 
-        semantic_labels = utils.segmentation.CITYSCAPE_CATEGORIES + utils.segmentation.CONCEPT_CATEGORIES
-        hsv = cv2.cvtColor((semantic.reshape(1, -1, 3) * 255.0).astype(np.uint8), cv2.COLOR_RGB2HSV)[0, :, :].astype(np.float64)
-        semantic_ids = np.round(hsv[:, 0] / 180.0 * len(semantic_labels))
-        semantic_ids[hsv[:, 1] < 127] = -1
-        semantic_ids = semantic_ids.astype(np.int64)
-        semantic_labels = np.array(semantic_labels, dtype="T")
+        lifting = np.load(lifting_path)
+        feats = lifting["feats"]
+        feats_labels = np.array(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES, dtype="T")
 
         ctx.logger.info("writing output to database")
         [output] = self.output()
         with output.open() as f:
             f.attrs.update(self.param_kwargs)
 
-            f.create_dataset("ego_centers", data=ego_centers, dtype=np.float32, compression="gzip")
+            f.create_dataset("ego_frames", data=ego_frames, dtype=np.int32, compression="gzip")
+            f.create_dataset("ego_xyz", data=ego_xyz, dtype=np.float32, compression="gzip")
+            f.create_dataset("ego_images", data=ego_images, dtype=np.uint8, compression="gzip")
 
             f.create_dataset("alt_frames", data=alt_frames, dtype=np.int32, compression="gzip")
+            f.create_dataset("alt_xyz", data=alt_xyz, dtype=np.float32, compression="gzip")
             f.create_dataset("alt_labels", data=alt_labels, dtype=h5py.string_dtype(), compression="gzip")
-            f.create_dataset("alt_centers", data=alt_centers, dtype=np.float32, compression="gzip")
 
             f.create_dataset("xyz", data=xyz, dtype=np.float32, compression="gzip")
             f.create_dataset("rgb", data=rgb, dtype=np.float32, compression="gzip")
 
-            f.create_dataset("semantic_labels", data=semantic_labels, dtype=h5py.string_dtype(), compression="gzip")
-            f.create_dataset("semantic_ids", data=semantic_ids, dtype=np.int32, compression="gzip")
+            f.create_dataset("feats", data=feats, dtype=np.uint8, compression="gzip")
+            f.create_dataset("feats_labels", data=feats_labels, dtype=h5py.string_dtype(), compression="gzip")

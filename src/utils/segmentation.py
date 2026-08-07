@@ -34,12 +34,27 @@ CITYSCAPE_CATEGORIES = [
     "bicycle"
 ]
 
-
 CONCEPT_CATEGORIES = [
     "lane markings",
     "traffic sign",
     "sidewalk",
     "lane",
+]
+
+CITYSCAPE_PLUS_CATEGORIES = [
+    "road",
+    "sidewalk",
+    "building",
+    "wall",
+    "fence",
+    "pole",
+    "traffic light",
+    "traffic sign",
+    "vegetation",
+    "terrain",
+    "sky",
+    "lane markings",
+    "unknown",
 ]
 
 
@@ -100,15 +115,12 @@ def semantic_segmentation(image_dir: str, output_dir: str):
             results = processor.post_process_semantic_segmentation(outputs, target_sizes=[(h, w)])[0]
 
             seg = results.cpu().numpy()
-            num_feats = len(CITYSCAPE_CATEGORIES)
-            hues = np.linspace(0, 180, num_feats, endpoint=False, dtype=np.uint8)
-            palette = np.array([cv2.cvtColor(np.array([[[hue, 255, 255]]], dtype=np.uint8), cv2.COLOR_HSV2RGB)[0, 0] for hue in hues])
-            seg_rgb = np.zeros_like(image)
+            seg_u8 = np.full_like(image, fill_value=255, dtype=np.uint8)
             for id, _ in enumerate(CITYSCAPE_CATEGORIES):
-                seg_rgb[seg == id] = palette[id]
+                seg_u8[seg == id] = id
 
             # write image
-            cv2.imwrite(os.path.join(output_dir, filename), cv2.cvtColor(seg_rgb, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(os.path.join(output_dir, filename), seg_u8)
 
     impl()
     gc.collect()
@@ -138,7 +150,6 @@ def concept_segmentation(image_dir: str, output_dir: str, texts: list[str], num_
         num_images = len(images)
         num_feats = len(texts)
         h, w, _ = images[0].shape
-        bufs = np.zeros((num_images, num_feats, h, w), dtype=np.bool)
 
         text_pairs = []
         for text in texts:
@@ -146,10 +157,11 @@ def concept_segmentation(image_dir: str, output_dir: str, texts: list[str], num_
             text_embeds = model.get_text_features(**text_inputs)
             text_pairs.append((text_inputs, text_embeds))
 
-        for i in rich.progress.track(range(num_images), total=num_images, console=ctx.console):
+        for i, filename in rich.progress.track(enumerate(filenames), total=num_images, console=ctx.console):
             vision_inputs = processor(images=images[i], return_tensors="pt").to(model.device)
             vision_embeds = model.get_vision_features(pixel_values=vision_inputs.pixel_values)
 
+            feats = np.zeros((h, w, num_feats), dtype=np.bool)
             for j, (text_inputs, text_embed) in enumerate(text_pairs):
                 outputs = model(
                     vision_embeds=vision_embeds,
@@ -167,7 +179,7 @@ def concept_segmentation(image_dir: str, output_dir: str, texts: list[str], num_
                 seg = np.clip(np.sum(seg, axis=0), 0.0, 1.0)
                 if seg.shape != (h, w):
                     continue
-                bufs[i, j, :, :] = seg > 0.5
+                feats[:, :, j] = seg > 0.5
 
                 # cleanup torch objects
                 del results
@@ -179,14 +191,9 @@ def concept_segmentation(image_dir: str, output_dir: str, texts: list[str], num_
             gc.collect()
             torch.cuda.empty_cache()
 
-        hues = np.linspace(0, 180, num_feats, endpoint=False, dtype=np.uint8)
-        palette = np.array([cv2.cvtColor(np.array([[[hue, 255, 255]]], dtype=np.uint8), cv2.COLOR_HSV2RGB)[0, 0] for hue in hues])
-
-        segs_rgb = palette[bufs.argmax(axis=1)]  # pick the color of the first detected feature
-        segs_rgb[~bufs.any(axis=1)] = [0.0, 0.0, 0.0]  # set to black if no feature detected
-        for i, filename in enumerate(filenames):
-            seg_rgb = segs_rgb[i]
-            cv2.imwrite(os.path.join(output_dir, filename), cv2.cvtColor(seg_rgb, cv2.COLOR_RGB2BGR))
+            seg_u8 = feats.argmax(axis=2).astype(np.uint8)  # pick the color of the first detected feature
+            seg_u8[~feats.any(axis=2)] = 255  # set to 255 if no feature detected
+            cv2.imwrite(os.path.join(output_dir, filename), seg_u8)
 
     # cleanup torch objects
     impl()
@@ -197,9 +204,7 @@ def concept_segmentation(image_dir: str, output_dir: str, texts: list[str], num_
 def merge_segmentation(
     image_dir: str,  # for filename reference only, not used data
     semantic_seg_dir: str,
-    num_semantic_seg: int,
     concept_seg_dir: str,
-    num_concept_seg: int,
     segmentation_dir: str,
 ):
     filenames = os.listdir(image_dir)
@@ -208,27 +213,20 @@ def merge_segmentation(
         concept_seg_path = os.path.join(concept_seg_dir, filename)
         segmentation_path = os.path.join(segmentation_dir, filename)
 
-        semantic_seg = cv2.imread(semantic_seg_path)
-        concept_seg = cv2.imread(concept_seg_path)
+        semantic_seg = cv2.imread(semantic_seg_path, cv2.IMREAD_GRAYSCALE)
+        concept_seg = cv2.imread(concept_seg_path, cv2.IMREAD_GRAYSCALE)
         assert isinstance(semantic_seg, np.ndarray) and isinstance(concept_seg, np.ndarray)
 
-        semantic_seg_hsv = cv2.cvtColor(semantic_seg, cv2.COLOR_BGR2HSV)
-        concept_seg_hsv = cv2.cvtColor(concept_seg, cv2.COLOR_BGR2HSV)
-        semantic_seg_mask = semantic_seg_hsv[:, :, 2] > 127
-        concept_seg_mask = concept_seg_hsv[:, :, 2] > 127
-        semantic_seg_id = np.round(semantic_seg_hsv[:, :, 0] / (180 / num_semantic_seg))
-        concept_seg_id = np.round(concept_seg_hsv[:, :, 0] / (180 / num_concept_seg))
+        output_seg = np.zeros_like(semantic_seg, dtype=np.uint8)
 
-        seg_id = np.zeros_like(semantic_seg_id, dtype=np.uint8)
-        seg_id[semantic_seg_mask] = semantic_seg_id[semantic_seg_mask]
-        seg_id[concept_seg_mask] = num_semantic_seg + concept_seg_id[concept_seg_mask]
+        output_seg[:, :] = 12  # unknown
+        output_seg[semantic_seg < 11] = semantic_seg[semantic_seg < 11]  # cityscape
+        output_seg[concept_seg == 3] = 0  # road
+        output_seg[concept_seg == 2] = 1  # sidewalk
+        output_seg[concept_seg == 1] = 7  # traffic sign
+        output_seg[concept_seg == 0] = 11  # lane markings
 
-        num_seg = num_semantic_seg + num_concept_seg
-        hues = np.linspace(0, 180, num_seg, endpoint=False, dtype=np.uint8)
-        palette = np.array([cv2.cvtColor(np.array([[[hue, 255, 255]]], dtype=np.uint8), cv2.COLOR_HSV2RGB)[0, 0] for hue in hues])
-        seg_rgb = palette[seg_id]
-
-        cv2.imwrite(segmentation_path, cv2.cvtColor(seg_rgb, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(segmentation_path, output_seg)
 
 
 def project_ray(
