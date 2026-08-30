@@ -126,7 +126,10 @@ class MergeTask(luigi.Task):
         rgb = np.asarray(pcd.colors, dtype=np.float32)
 
         lifting = np.load(lifting_path)
-        feats = lifting["feats"]
+        feats = lifting["feats"]  # (N, M) where N is the number of points and M is the number of features
+        feats = np.argmax(feats, axis=1)  # (N,) where each value is the index of the max feature
+        feats[np.max(feats) == 0.0] = len(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES) - 1  # set all zero features to `unknown`
+        feats = feats.astype(np.uint8)
         feats_labels = np.array(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES, dtype="T")
 
         ctx.logger.info("writing output to database")
