@@ -55,7 +55,7 @@ CREATE_DESCRIPTORS_TABLE = """CREATE TABLE IF NOT EXISTS descriptors (
     data BLOB,
     FOREIGN KEY(image_id) REFERENCES images(image_id) ON DELETE CASCADE)"""
 
-CREATE_IMAGES_TABLE = """CREATE TABLE IF NOT EXISTS images (
+CREATE_IMAGES_TABLE = f"""CREATE TABLE IF NOT EXISTS images (
     image_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     name TEXT NOT NULL UNIQUE,
     camera_id INTEGER NOT NULL,
@@ -66,9 +66,9 @@ CREATE_IMAGES_TABLE = """CREATE TABLE IF NOT EXISTS images (
     prior_tx REAL,
     prior_ty REAL,
     prior_tz REAL,
-    CONSTRAINT image_id_check CHECK(image_id >= 0 and image_id < {}),
+    CONSTRAINT image_id_check CHECK(image_id >= 0 and image_id < {MAX_IMAGE_ID}),
     FOREIGN KEY(camera_id) REFERENCES cameras(camera_id))
-""".format(MAX_IMAGE_ID)
+"""
 
 CREATE_TWO_VIEW_GEOMETRIES_TABLE = """
 CREATE TABLE IF NOT EXISTS two_view_geometries (
@@ -128,15 +128,13 @@ def pair_id_to_image_ids(pair_id):
 def array_to_blob(array):
     if IS_PYTHON3:
         return array.tobytes()
-    else:
-        return np.getbuffer(array)
+    return np.getbuffer(array)
 
 
 def blob_to_array(blob, dtype, shape=(-1,)):
     if IS_PYTHON3:
         return np.fromstring(blob, dtype=dtype).reshape(*shape)
-    else:
-        return np.frombuffer(blob, dtype=dtype).reshape(*shape)
+    return np.frombuffer(blob, dtype=dtype).reshape(*shape)
 
 
 class COLMAPDatabase(sqlite3.Connection):
@@ -145,7 +143,7 @@ class COLMAPDatabase(sqlite3.Connection):
         return sqlite3.connect(str(database_path), factory=COLMAPDatabase)
 
     def __init__(self, *args, **kwargs):
-        super(COLMAPDatabase, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
         self.create_tables = lambda: self.executescript(CREATE_ALL)
         self.create_cameras_table = lambda: self.executescript(CREATE_CAMERAS_TABLE)

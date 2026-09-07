@@ -2,17 +2,17 @@ import os
 import shutil
 import tempfile
 
-import luigi
-import pycolmap
-import numpy as np
 import cv2
+import luigi
+import numpy as np
+import pycolmap
 
 import context
+import tasks.object_masking
 import tasks.reconstruction
 import tasks.video_sampling
-import tasks.object_masking
-import utils.task
 import utils.reconstruction
+import utils.task
 
 
 class PatchMatchStereoTask(luigi.Task):

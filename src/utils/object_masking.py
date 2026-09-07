@@ -9,7 +9,6 @@ import transformers
 
 import context
 
-
 ALL_CATEGORIES = [
     "road",
     "sidewalk",

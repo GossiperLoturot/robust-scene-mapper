@@ -2,10 +2,10 @@ import os
 import shutil
 import tempfile
 
+import cv2
 import luigi
 import numpy as np
 import open3d as o3d
-import cv2
 
 import context
 import tasks.alignment

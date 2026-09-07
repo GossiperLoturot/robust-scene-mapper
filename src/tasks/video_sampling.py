@@ -2,8 +2,8 @@ import os
 import shutil
 import tempfile
 
-import luigi
 import cv2
+import luigi
 
 import context
 import utils.task

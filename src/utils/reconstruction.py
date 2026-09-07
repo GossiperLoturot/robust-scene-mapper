@@ -73,7 +73,7 @@ def upload_database(
             # Add pairs for geometry verification
             name_i = os.path.basename(matching_result.image_paths[i])
             name_j = os.path.basename(matching_result.image_paths[j])
-            pairs_file.write("{} {}\n".format(name_i, name_j))
+            pairs_file.write(f"{name_i} {name_j}\n")
 
         # finalize
         db_file.commit()

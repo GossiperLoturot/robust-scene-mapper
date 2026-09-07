@@ -25,3 +25,35 @@ dependencies = [
 
 [tool.uv.sources]
 lifting-seg = { path = "deps/lifting-seg" }
+
+[tool.ruff]
+target-version = "py312"
+line-length = 999
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+skip-magic-trailing-comma = false
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "N",
+    "UP",
+    "B",
+    "SIM",
+    "C4",
+    "PIE",
+    "RET",
+    "ARG",
+    "PTH",
+    "RUF",
+    "ANN",
+    "PYI",
+]
+fixable = ["ALL"]
+

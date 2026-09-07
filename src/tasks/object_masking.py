@@ -2,8 +2,8 @@ import os
 import shutil
 import tempfile
 
-import luigi
 import cv2
+import luigi
 import numpy as np
 
 import context

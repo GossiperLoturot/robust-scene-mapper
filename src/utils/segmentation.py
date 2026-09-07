@@ -3,14 +3,13 @@ import gc
 import os
 
 import cv2
+import lifting_seg
 import numpy as np
 import rich.progress
 import torch
 import transformers
 
-import lifting_seg
 import context
-
 
 CITYSCAPE_CATEGORIES = [
     "road",

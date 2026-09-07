@@ -67,7 +67,7 @@ def load_image_masks(image_dir: str, mask_dir: str) -> list[ImageMask]:
 
 # シーケンスのサイズを指定して、シングルとペアのインデックスを生成
 def generate_matching_pairs(size: int) -> MatchingPairs:
-    offsets = [math.ceil(2 ** (0.6 * i)) for i in range(0, 8)]
+    offsets = [math.ceil(2 ** (0.6 * i)) for i in range(8)]
     offsets = list(set(offsets))
 
     image_indices = list[int]()
@@ -122,7 +122,7 @@ def extract_feature_and_match(
             x, y = keypoints[:, :, 0], keypoints[:, :, 1]
 
             # マスク領域および画像範囲内の特徴点のみをフィルタリング
-            valid_mask = (0 < mask[0, 0, y.int(), x.int()]) & (0 <= x) & (x <= width) & (0 <= y) & (y <= height)
+            valid_mask = (mask[0, 0, y.int(), x.int()] > 0) & (x >= 0) & (x <= width) & (y >= 0) & (y <= height)
 
             image_paths[i] = image_path
             image_sizes[i] = (height, width)

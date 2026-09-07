@@ -1,5 +1,5 @@
-import os
 import glob
+import os
 
 os.environ["TORCH_HOME"] = ".cache/torch"
 os.environ["HF_HOME"] = ".cache/huggingface"
@@ -59,7 +59,7 @@ if __name__ == "__main__":
     ctx = context.Context()
 
     # read config from yaml file
-    with open("config.yaml", "r") as f:
+    with open("config.yaml") as f:
         config = yaml.safe_load(f)
     ctx.logger.info(f"load config.yaml: {config}")
 

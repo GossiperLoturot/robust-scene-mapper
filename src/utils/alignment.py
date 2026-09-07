@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pycolmap
 import rich.progress
-import scipy.optimize
 import scipy.interpolate
+import scipy.optimize
 
 import context
 
@@ -86,7 +86,7 @@ def fit_to_tps(
 
     best_count = 0
     best_model, best_inliers = None, None
-    
+
     for _ in rich.progress.track(range(max_iters), description="fit to tps", console=ctx.console):
         idx = np.random.choice(xyz.shape[0], size=sample_size, replace=False)
         model = scipy.interpolate.RBFInterpolator(

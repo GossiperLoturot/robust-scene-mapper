@@ -9,8 +9,8 @@ import context
 import tasks.object_masking
 import tasks.video_sampling
 import utils.feature_matching
-import utils.task
 import utils.object_masking
+import utils.task
 
 
 class FeatureMatchingTask(luigi.Task):
