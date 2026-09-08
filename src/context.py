@@ -1,4 +1,5 @@
 import logging
+import typing
 
 import rich.console
 import rich.logging
@@ -15,13 +16,13 @@ class Context:
     export_dir: str
     retry_count: int
 
-    def __new__(cls):
+    def __new__(cls) -> typing.Self:
         if cls._singleton is None:
             cls._singleton = super().__new__(cls)
             cls._singleton.init()
         return cls._singleton
 
-    def init(self):
+    def init(self) -> None:
         self.console = rich.console.Console()
 
         self.handler = rich.logging.RichHandler(console=self.console)

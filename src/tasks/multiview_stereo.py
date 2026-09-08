@@ -16,8 +16,6 @@ import utils.task
 
 
 class PatchMatchStereoTask(luigi.Task):
-    resources = { "gpu_vol": 1 }
-
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -31,7 +29,7 @@ class PatchMatchStereoTask(luigi.Task):
     highres_width: luigi.IntParameter = luigi.IntParameter()
     highres_height: luigi.IntParameter = luigi.IntParameter()
 
-    def requires(self):
+    def requires(self) -> list[luigi.Task]:
         video_sampling = tasks.video_sampling.VideoSamplingTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -52,11 +50,11 @@ class PatchMatchStereoTask(luigi.Task):
         )
         return [video_sampling, reconstruction]
 
-    def output(self):
+    def output(self) -> list[luigi.Target]:
         ctx = context.Context()
         return [utils.task.FsArchiveTarget(ctx.database_dir, self)]
 
-    def run(self):
+    def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[video_sampling], [reconstruction]] = self.input()
@@ -83,8 +81,6 @@ class PatchMatchStereoTask(luigi.Task):
 
 
 class StereoFusionTask(luigi.Task):
-    resources = { "gpu_vol": 1 }
-
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -99,7 +95,7 @@ class StereoFusionTask(luigi.Task):
     highres_height: luigi.IntParameter = luigi.IntParameter()
     mask_categories: luigi.ListParameter = luigi.ListParameter()
 
-    def requires(self):
+    def requires(self) -> list[luigi.Task]:
         object_masking = tasks.object_masking.ObjectMaskingTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -124,11 +120,11 @@ class StereoFusionTask(luigi.Task):
 
         return [object_masking, patch_match_stereo]
 
-    def output(self):
+    def output(self) -> list[luigi.Target]:
         ctx = context.Context()
         return [utils.task.FsTarget(ctx.database_dir, self)]
 
-    def run(self):
+    def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[object_masking], [patch_match_stereo]] = self.input()

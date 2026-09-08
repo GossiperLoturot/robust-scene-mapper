@@ -1,3 +1,4 @@
+import functools
 import os
 import shutil
 import tempfile
@@ -67,7 +68,7 @@ def plot_path(
     path: str,
     path_target: evo.core.trajectory.PosePath3D,
     path_ref: evo.core.trajectory.PosePath3D,
-):
+) -> None:
     fig = plt.figure(figsize=(8, 8))
     ax = evo.tools.plot.prepare_axis(fig, plot_mode=evo.tools.plot.PlotMode.xyz)
     evo.tools.plot.traj(ax=ax, plot_mode=evo.tools.plot.PlotMode.xyz, traj=path_target, color="blue")
@@ -106,7 +107,7 @@ def fit_to_tps(
 
 
 def project_points_to_tps(
-    K: np.ndarray,
+    k: np.ndarray,
     ext_w2c: np.ndarray,
     images_rgb: np.ndarray,
     masks_bool: np.ndarray,
@@ -116,28 +117,29 @@ def project_points_to_tps(
 ) -> tuple[np.ndarray, np.ndarray]:
     ctx = context.Context()
 
-    N, H, W, _ = images_rgb.shape
-    us, vs = np.meshgrid(np.arange(W), np.arange(H))
+    n_dim, h_dim, w_dim, _ = images_rgb.shape
+    us, vs = np.meshgrid(np.arange(w_dim), np.arange(h_dim))
     ones = np.ones_like(us)
     pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (H * W, 3)
 
     points_all, colors_all = [], []
-    ctx.logger.info(f"projecting points to thin-plate-spline with {N} frames...")
-    for i in rich.progress.track(range(N), total=N, console=ctx.console):
+    ctx.logger.info(f"projecting points to thin-plate-spline with {n_dim} frames...")
+    for i in rich.progress.track(range(n_dim), total=n_dim, console=ctx.console):
         if not np.any(masks_bool[i]):
             continue
         valid_idx = np.flatnonzero(masks_bool[i].reshape(-1))  # (H * W)
 
-        K_inv = np.linalg.inv(K[i])  # (3, 3) intrinsics
+        k_mat_inv = np.linalg.inv(k[i])  # (3, 3) intrinsics
         c2w = np.linalg.inv(ext_w2c[i])  # (4, 4) camera to world
 
-        rays = K_inv @ pix[valid_idx].T  # (3, M) ray direction
+        rays = k_mat_inv @ pix[valid_idx].T  # (3, M) ray direction
         camera_w, rays_w = c2w[:3, 3], c2w[:3, :3] @ rays  # (3, M) world camera position, (3, M) world ray direction
 
         depth_init = np.ones(rays_w.shape[1]) * init_depth  # (M,) initial depth
-        def obj_fn(depth: np.ndarray) -> np.ndarray:
+        def _obj_fn(depth: np.ndarray, camera_w: np.ndarray, rays_w: np.ndarray) -> np.ndarray:
             xyz = (camera_w[:, np.newaxis] + depth[np.newaxis, :] * rays_w).T
             return xyz[:, 1] - model(xyz[:, [0, 2]])
+        obj_fn = functools.partial(_obj_fn, camera_w=camera_w, rays_w=rays_w)
         depth_opt = scipy.optimize.newton(obj_fn, depth_init)
         assert isinstance(depth_opt, np.ndarray)
 
@@ -158,7 +160,7 @@ def project_points_to_tps(
 
 
 def project_tracking_to_tps(
-    K: np.ndarray,
+    k_mat: np.ndarray,
     ext_w2c: np.ndarray,
     centers_2d: list[np.ndarray],
     model: scipy.interpolate.RBFInterpolator,
@@ -167,11 +169,11 @@ def project_tracking_to_tps(
 ) -> list[np.ndarray]:
     ctx = context.Context()
 
-    N = len(centers_2d)
+    n_dim = len(centers_2d)
 
     centers_3d = []
-    ctx.logger.info(f"projecting tracking to thin-plate-spline with {N} frames...")
-    for i in rich.progress.track(range(N), total=N, console=ctx.console):
+    ctx.logger.info(f"projecting tracking to thin-plate-spline with {n_dim} frames...")
+    for i in rich.progress.track(range(n_dim), total=n_dim, console=ctx.console):
         if centers_2d[i].shape[0] == 0:
             centers_3d.append(np.zeros((0, 3)))
             continue
@@ -180,16 +182,17 @@ def project_tracking_to_tps(
         ones = np.ones_like(us)
         centers_home = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (M, 3)
 
-        K_inv = np.linalg.inv(K[i])  # (3, 3) intrinsics
+        k_mat_inv = np.linalg.inv(k_mat[i])  # (3, 3) intrinsics
         c2w = np.linalg.inv(ext_w2c[i])  # (4, 4) camera to world
 
-        rays = K_inv @ centers_home.T  # (3, M) ray direction
+        rays = k_mat_inv @ centers_home.T  # (3, M) ray direction
         camera_w, rays_w = c2w[:3, 3], c2w[:3, :3] @ rays  # (3, M) world camera position, (3, M) world ray direction
 
         depth_init = np.ones(rays_w.shape[1]) * init_depth  # (M,) initial depth
-        def obj_fn(depth: np.ndarray) -> np.ndarray:
+        def _obj_fn(depth: np.ndarray, camera_w: np.ndarray, rays_w: np.ndarray) -> np.ndarray:
             xyz = (camera_w[:, np.newaxis] + depth[np.newaxis, :] * rays_w).T
             return xyz[:, 1] - model(xyz[:, [0, 2]])
+        obj_fn = functools.partial(_obj_fn, camera_w=camera_w, rays_w=rays_w)
         depth_opt = scipy.optimize.newton(obj_fn, depth_init)
         assert isinstance(depth_opt, np.ndarray)
 

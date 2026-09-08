@@ -31,6 +31,8 @@
 
 # This script is based on an original implementation by True Price.
 
+# ruff: noqa
+
 import sqlite3
 import sys
 

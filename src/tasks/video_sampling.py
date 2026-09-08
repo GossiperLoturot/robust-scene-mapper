@@ -15,11 +15,11 @@ class VideoSamplingTask(luigi.Task):
     width: luigi.IntParameter = luigi.IntParameter()
     height: luigi.IntParameter = luigi.IntParameter()
 
-    def output(self):
+    def output(self) -> list[luigi.Target]:
         ctx = context.Context()
         return [utils.task.FsTarget(ctx.database_dir, self)]
 
-    def run(self):
+    def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             image_dir = os.path.join(temp_dir, "images")
@@ -42,7 +42,7 @@ class VideoSamplingTask(luigi.Task):
                     sampling_n += 1
 
                     # skip frames
-                    next_n = int(round(sampling_n * interval))
+                    next_n = round(sampling_n * interval)
                     while total_n < next_n:
                         ok = video_capture.grab()
                         if not ok:

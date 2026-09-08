@@ -59,10 +59,10 @@ EGO_VEHICLE_HLINE = 0.90
 
 
 @torch.inference_mode()
-def object_masking(image_dir: str, mask_dir: str, categories: list[str]):
+def object_masking(image_dir: str, mask_dir: str, categories: list[str]) -> None:
     ctx = context.Context()
 
-    def impl():
+    def impl() -> None:
         model_id = "facebook/mask2former-swin-large-cityscapes-semantic"
         processor = transformers.Mask2FormerImageProcessor.from_pretrained(model_id)
         model = transformers.Mask2FormerForUniversalSegmentation.from_pretrained(model_id, device_map="auto")
@@ -95,10 +95,10 @@ def object_masking(image_dir: str, mask_dir: str, categories: list[str]):
 
 
 @torch.inference_mode()
-def object_detection(images_rgb: np.ndarray, output_path: str):
+def object_detection(images_rgb: np.ndarray, output_path: str) -> None:
     ctx = context.Context()
 
-    def impl():
+    def impl() -> None:
         model_id = "roboflow/rf-detr-large"
         processor = transformers.RfDetrImageProcessor.from_pretrained(model_id, device_map="auto")
         model = transformers.RfDetrForObjectDetection.from_pretrained(model_id)
@@ -118,7 +118,7 @@ def object_detection(images_rgb: np.ndarray, output_path: str):
             )[0]
 
             boxes, labels = [], []
-            for label_id, box in zip(results["labels"], results["boxes"]):
+            for label_id, box in zip(results["labels"], results["boxes"], strict=True):
                 box = box.cpu().numpy() / np.array([w, h, w, h], dtype=np.float32)
                 label = model.config.id2label[label_id.item()]
                 boxes.append(box.tolist())

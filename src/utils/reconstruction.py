@@ -9,7 +9,7 @@ import utils.database
 import utils.feature_matching
 
 
-def resize_model(model: pycolmap.Reconstruction, width: int, height: int):
+def resize_model(model: pycolmap.Reconstruction, width: int, height: int) -> None:
     for camera_id in model.cameras:
         camera = model.cameras[camera_id]
         camera.params[0] *= width / camera.width
@@ -28,13 +28,9 @@ def upload_database(
     init_focal_length: float,
     matching_result: utils.feature_matching.FeatureMatchingResult,
     camera_mapping: utils.feature_matching.CameraMapping,
-):
-    # create COLMAP database
-    db_file = utils.database.COLMAPDatabase.connect(db_path)
-    # create pairs.txt
-    pairs_file = open(pairs_path, "w")
-
-    with db_file, pairs_file:
+) -> None:
+    # create COLMAP database and pairs.txt
+    with utils.database.COLMAPDatabase.connect(db_path) as db_file, open(pairs_path, "w") as pairs_file:
         # initialize
         db_file.create_tables()
 
@@ -87,7 +83,7 @@ def incremental_reconstruction(
     image_dir: str,
     input_model_dir: str,
     output_model_dir: str,
-):
+) -> None:
     ctx = context.Context()
 
     # reconstruct

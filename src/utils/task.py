@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import json
 import os
+import typing
 
 import backports.zstd.tarfile as tarfile
 import h5py
@@ -12,7 +13,7 @@ class FsTarget(luigi.Target):
     database_dir: str
     basename: str
 
-    def __init__(self, database_dir: str, task: luigi.Task):
+    def __init__(self, database_dir: str, task: luigi.Task) -> None:
         self.database_dir = database_dir
 
         task_name = task.__class__.__name__
@@ -42,7 +43,7 @@ class FsArchiveTarget(luigi.Target):
     database_dir: str
     basename: str
 
-    def __init__(self, database_dir: str, task: luigi.Task):
+    def __init__(self, database_dir: str, task: luigi.Task) -> None:
         self.database_dir = database_dir
 
         task_name = task.__class__.__name__
@@ -58,13 +59,13 @@ class FsArchiveTarget(luigi.Target):
         return os.path.exists(target_path)
 
     @contextlib.contextmanager
-    def open(self):
+    def open(self) -> typing.Generator[tarfile.TarFile, None, None]:
         target_path = os.path.join(self.database_dir, self.basename)
         with tarfile.open(target_path, "w:zst") as archive:
             yield archive
 
     @contextlib.contextmanager
-    def read(self):
+    def read(self) -> typing.Generator[tarfile.TarFile, None, None]:
         target_path = os.path.join(self.database_dir, self.basename)
         assert os.path.exists(target_path), f"target does not exist: {target_path}"
         with tarfile.open(target_path, "r:zst") as archive:
@@ -75,7 +76,7 @@ class HDF5Target(luigi.Target):
     database_dir: str
     basename: str
 
-    def __init__(self, database_dir: str, task: luigi.Task):
+    def __init__(self, database_dir: str, task: luigi.Task) -> None:
         self.database_dir = database_dir
 
         task_name = task.__class__.__name__
@@ -91,13 +92,13 @@ class HDF5Target(luigi.Target):
         return os.path.exists(target_path)
 
     @contextlib.contextmanager
-    def open(self):
+    def open(self) -> typing.Generator[h5py.File, None, None]:
         target_path = os.path.join(self.database_dir, self.basename)
         with h5py.File(target_path, "w") as h5file:
             yield h5file
 
     @contextlib.contextmanager
-    def read(self):
+    def read(self) -> typing.Generator[h5py.File, None, None]:
         target_path = os.path.join(self.database_dir, self.basename)
         assert os.path.exists(target_path), f"target does not exist: {target_path}"
         with h5py.File(target_path, "r") as h5file:

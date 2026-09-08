@@ -37,7 +37,7 @@ class MergeTask(luigi.Task):
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
 
-    def requires(self):
+    def requires(self) -> list[luigi.Task]:
         surface = tasks.alignment.SurfaceTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -87,11 +87,11 @@ class MergeTask(luigi.Task):
         )
         return [surface, alignment, lifting]
 
-    def output(self):
+    def output(self) -> list[luigi.Target]:
         ctx = context.Context()
         return [utils.task.HDF5Target(ctx.export_dir, self)]
 
-    def run(self):
+    def run(self) -> None:
         ctx = context.Context()
 
         [[surface], [alignment], [lifting]] = self.input()

@@ -12,7 +12,7 @@ import rich.logging
 import transformers
 
 
-def main():
+def main() -> None:
     console = rich.console.Console()
 
     handler = rich.logging.RichHandler(console=console)

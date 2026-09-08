@@ -19,14 +19,12 @@ import utils.task
 
 
 class SegmentationTask(luigi.Task):
-    resources = { "gpu_vol": 1 }
-
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     highres_width: luigi.IntParameter = luigi.IntParameter()
     highres_height: luigi.IntParameter = luigi.IntParameter()
 
-    def requires(self):
+    def requires(self) -> list[luigi.Task]:
         video_sampling = tasks.video_sampling.VideoSamplingTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -35,11 +33,11 @@ class SegmentationTask(luigi.Task):
         )
         return [video_sampling]
 
-    def output(self):
+    def output(self) -> list[luigi.Target]:
         ctx = context.Context()
         return [utils.task.FsTarget(ctx.database_dir, self)]
 
-    def run(self):
+    def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[video_sampling]] = self.input()
@@ -94,7 +92,7 @@ class LiftingTask(luigi.Task):
 
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()  # [0, 1]
 
-    def requires(self):
+    def requires(self) -> list[luigi.Task]:
         segmentation = SegmentationTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -151,11 +149,11 @@ class LiftingTask(luigi.Task):
         )
         return [segmentation, object_masking, reconstruction, alignment, surface]
 
-    def output(self):
+    def output(self) -> list[luigi.Target]:
         ctx = context.Context()
         return [utils.task.FsTarget(ctx.database_dir, self)]
 
-    def run(self):
+    def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[segmentation], [object_masking], [reconstruction], [alignment], [surface]] = self.input()

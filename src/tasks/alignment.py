@@ -31,7 +31,7 @@ class AlignmentTask(luigi.Task):
     init_frame_height: luigi.IntParameter = luigi.IntParameter()
     init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
 
-    def requires(self):
+    def requires(self) -> list[luigi.Task]:
         video_sampling = tasks.video_sampling.VideoSamplingTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -71,11 +71,11 @@ class AlignmentTask(luigi.Task):
         )
         return [video_sampling, object_masking, reconstruction, depth]
 
-    def output(self):
+    def output(self) -> list[luigi.Target]:
         ctx = context.Context()
         return [utils.task.FsTarget(ctx.database_dir, self)]
 
-    def run(self):
+    def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[video_sampling], [object_masking], [reconstruction], [depth]] = self.input()
@@ -163,7 +163,7 @@ class SurfaceTask(luigi.Task):
     max_depth: luigi.FloatParameter = luigi.FloatParameter()  # [m]
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [0.0, 1.0]
 
-    def requires(self):
+    def requires(self) -> list[luigi.Task]:
         tracking = tasks.object_masking.TrackingTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -222,11 +222,11 @@ class SurfaceTask(luigi.Task):
         )
         return [tracking, alignment, stereo_fusion_guide, stereo_fusion]
 
-    def output(self):
+    def output(self) -> list[luigi.Target]:
         ctx = context.Context()
         return [utils.task.FsTarget(ctx.database_dir, self)]
 
-    def run(self):
+    def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[tracking], [alignment], [stereo_fusion_guide], [stereo_fusion]] = self.input()
@@ -247,7 +247,7 @@ class SurfaceTask(luigi.Task):
             width, height = images_rgb.shape[2], images_rgb.shape[1]
             tracking_pickle = np.load(tracking_path, allow_pickle=True)
             all_centers, all_labels = [], []
-            for i, results in enumerate(tracking_pickle["all_results"]):
+            for results in tracking_pickle["all_results"]:
                 boxes = results["boxes"]
                 labels = results["labels"]
                 available_centers, available_labels = [], []
@@ -304,7 +304,7 @@ class SurfaceTask(luigi.Task):
                 max_depth=self.max_depth,
             )
             all_results = []
-            for centers, labels in zip(all_centers, all_labels):
+            for centers, labels in zip(all_centers, all_labels, strict=True):
                 all_results.append({ "centers": centers, "labels": labels })
 
             # write points as PLY format

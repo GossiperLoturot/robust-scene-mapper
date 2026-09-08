@@ -14,8 +14,6 @@ import utils.task
 
 
 class FeatureMatchingTask(luigi.Task):
-    resources = { "gpu_vol": 1 }
-
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -24,7 +22,7 @@ class FeatureMatchingTask(luigi.Task):
     depth_confidence: luigi.FloatParameter = luigi.FloatParameter()
     width_confidence: luigi.FloatParameter = luigi.FloatParameter()
 
-    def requires(self):
+    def requires(self) -> list[luigi.Task]:
         video_sampling = tasks.video_sampling.VideoSamplingTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -40,11 +38,11 @@ class FeatureMatchingTask(luigi.Task):
         )
         return [video_sampling, object_masking]
 
-    def output(self):
+    def output(self) -> list[luigi.Target]:
         ctx = context.Context()
         return [utils.task.FsTarget(ctx.database_dir, self)]
 
-    def run(self):
+    def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
             [[video_sampling], [object_masking]] = self.input()

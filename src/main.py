@@ -30,7 +30,7 @@ class DispatchTask(luigi.WrapperTask):
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
 
-    def requires(self):
+    def requires(self) -> list[luigi.Task]:
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
             task = tasks.merge.MergeTask(

@@ -54,7 +54,7 @@ def load_image_masks(image_dir: str, mask_dir: str) -> list[ImageMask]:
         mask_paths.append(f"{mask_dir}/{filename}")
 
     image_masks = list[ImageMask]()
-    for image_path, mask_path in zip(image_paths, mask_paths):
+    for image_path, mask_path in zip(image_paths, mask_paths, strict=True):
         assert os.path.basename(image_path) == os.path.basename(mask_path)
 
         image = kornia.io.load_image(image_path, device=device)[None, ...]
@@ -94,7 +94,7 @@ def extract_feature_and_match(
 ) -> FeatureMatchingResult:
     ctx = context.Context()
 
-    def impl():
+    def impl() -> FeatureMatchingResult:
         device = kornia.core.utils.get_cuda_or_mps_device_if_available()
 
         image_paths = dict[int, str]()
@@ -149,5 +149,4 @@ def create_camera_mapping(image_masks: list[ImageMask]) -> CameraMapping:
     image_to_camera = dict[int, int]()
     for i in range(len(image_masks)):
         image_to_camera[i] = 0
-    camera_mapping = CameraMapping(num_cameras=1, image_to_camera=image_to_camera)
-    return camera_mapping
+    return CameraMapping(num_cameras=1, image_to_camera=image_to_camera)

@@ -91,10 +91,10 @@ def rgb2sparse_via_hue(rgb: np.ndarray, num_feats: int) -> np.ndarray:
 
 
 @torch.inference_mode()
-def semantic_segmentation(image_dir: str, output_dir: str):
+def semantic_segmentation(image_dir: str, output_dir: str) -> None:
     ctx = context.Context()
 
-    def impl():
+    def impl() -> None:
         model_id = "facebook/mask2former-swin-large-cityscapes-semantic"
         processor = transformers.Mask2FormerImageProcessor.from_pretrained(model_id)
         model = transformers.Mask2FormerForUniversalSegmentation.from_pretrained(model_id, device_map="auto")
@@ -127,10 +127,10 @@ def semantic_segmentation(image_dir: str, output_dir: str):
 
 
 @torch.inference_mode()
-def concept_segmentation(image_dir: str, output_dir: str, texts: list[str], num_maxbatches: int = 8):
+def concept_segmentation(image_dir: str, output_dir: str, texts: list[str]) -> None:
     ctx = context.Context()
 
-    def impl():
+    def impl() -> None:
         model_id = "facebook/sam3"
         processor = transformers.Sam3Processor.from_pretrained(model_id)
         model = transformers.Sam3Model.from_pretrained(model_id, device_map="auto")
@@ -205,7 +205,7 @@ def merge_segmentation(
     semantic_seg_dir: str,
     concept_seg_dir: str,
     segmentation_dir: str,
-):
+) -> None:
     filenames = os.listdir(image_dir)
     for filename in filenames:
         semantic_seg_path = os.path.join(semantic_seg_dir, filename)
@@ -229,7 +229,7 @@ def merge_segmentation(
 
 
 def project_ray(
-    K: np.ndarray,
+    k_mat: np.ndarray,
     ext_w2c: np.ndarray,
     seg_feats: np.ndarray,
     masks_bool: np.ndarray,
@@ -238,32 +238,32 @@ def project_ray(
 ) -> tuple[np.ndarray, np.ndarray]:
     ctx = context.Context()
 
-    N, H, W, F = seg_feats.shape
-    us, vs = np.meshgrid(np.arange(W), np.arange(H))
+    n_dim, h_dim, w_dim, f_dim = seg_feats.shape
+    us, vs = np.meshgrid(np.arange(w_dim), np.arange(h_dim))
     ones = np.ones_like(us)
     pix = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (H * W, 3)
 
     rays_all, feats_all = [], []
-    for i in rich.progress.track(range(N), total=N, description="project ray", console=ctx.console):
+    for i in rich.progress.track(range(n_dim), total=n_dim, description="project ray", console=ctx.console):
         if not np.any(masks_bool[i]):
             continue
         valid_idx = np.flatnonzero(masks_bool[i].reshape(-1))  # (H * W)
 
-        K_inv = np.linalg.inv(K[i])  # (3, 3) intrinsics
+        k_mat_inv = np.linalg.inv(k_mat[i])  # (3, 3) intrinsics
         c2w = np.linalg.inv(ext_w2c[i])  # (4, 4) camera to world
 
-        ray_c = K_inv @ pix[valid_idx].T  # (3, M) ray direction
+        ray_c = k_mat_inv @ pix[valid_idx].T  # (3, M) ray direction
         camera_w, rays_w = c2w[:3, 3], c2w[:3, :3] @ ray_c  # (3, M) world camera position, (3, M) world ray direction
         pts_w0 = (camera_w[:, np.newaxis] + near_clip * rays_w).T  # (M, 3) points
         pts_w1 = (camera_w[:, np.newaxis] + far_clip * rays_w).T  # (M, 3) points
         rays = np.stack([pts_w0, pts_w1], axis=1)  # (M, 2, 3) lines
-        feats = seg_feats[i].reshape(-1, F)[valid_idx]  # (M, F) colors
+        feats = seg_feats[i].reshape(-1, f_dim)[valid_idx]  # (M, F) colors
 
         rays_all.append(rays)  # (M, 2, 3)
         feats_all.append(feats)  # (M, F)
 
     if len(rays_all) == 0:
-        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, F), dtype=np.float64)
+        return np.zeros((0, 3), dtype=np.float64), np.zeros((0, f_dim), dtype=np.float64)
 
     return np.concat(rays_all, 0), np.concat(feats_all, 0)
 
