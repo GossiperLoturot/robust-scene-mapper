@@ -57,19 +57,7 @@ class AlignmentTask(luigi.Task):
             init_frame_height=self.init_frame_height,
             init_focal_length=self.init_focal_length,
         )
-        depth = tasks.depth.DepthTask(
-            input_path=self.input_path,
-            fps=self.fps,
-            width=self.width,
-            height=self.height,
-            max_keypoints=self.max_keypoints,
-            width_confidence=self.width_confidence,
-            depth_confidence=self.depth_confidence,
-            init_frame_width=self.init_frame_width,
-            init_frame_height=self.init_frame_height,
-            init_focal_length=self.init_focal_length,
-        )
-        return [video_sampling, object_masking, reconstruction, depth]
+        return [video_sampling, object_masking, reconstruction]
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
@@ -78,11 +66,10 @@ class AlignmentTask(luigi.Task):
     def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
-            [[video_sampling], [object_masking], [reconstruction], [depth]] = self.input()
+            [[video_sampling], [object_masking], [reconstruction]] = self.input()
             image_dir = os.path.join(video_sampling.read(), "images")
             mask_dir = os.path.join(object_masking.read(), "masks")
             model_dir = os.path.join(reconstruction.read(), "model")
-            depth_path = os.path.join(depth.read(), "results.npz")
 
             # extract reference model extrinsics
             extrinsics_base = []
@@ -91,13 +78,6 @@ class AlignmentTask(luigi.Task):
                 image = model.image(image_id)
                 extrinsics_base.append(np.concat([image.cam_from_world().matrix(), [[0, 0, 0, 1]]]))
             extrinsics_base = np.array(extrinsics_base)
-            # extract estimated model extrinsics
-            depth_result = np.load(depth_path)
-            extrinsics_metric = depth_result["extrinsics"]  # world to camera matrix
-
-            # align model (guided to estimated quantinity)
-            path_base, path_metric, scale_b2m = utils.alignment.align_path_from_extrinsics(extrinsics_base, extrinsics_metric)
-            ctx.logger.info(f"guide to est scale: {scale_b2m}")
 
             # read intrinsics and rgb, mask images
             images_rgb, intrinsics = utils.alignment.undistort_image_dir(model_dir, image_dir, rgb=True)
@@ -108,9 +88,7 @@ class AlignmentTask(luigi.Task):
             flip_mat = np.eye(4)
             flip_mat[0, 0] = -1.0
             flip_mat[1, 1] = -1.0
-            scale_mat = np.eye(4)
-            scale_mat[:3, :3] *= scale_b2m
-            b2a_mat = scale_mat @ flip_mat @ extrinsics_base[0]
+            b2a_mat = flip_mat @ extrinsics_base[0]
             # compute trajectory normal
             trajectory = np.linalg.inv(extrinsics_base @ np.linalg.inv(b2a_mat))[:, :3, 3]
             center = np.mean(trajectory, axis=0)
@@ -121,28 +99,16 @@ class AlignmentTask(luigi.Task):
             normal_mat = np.eye(4)
             normal_mat[:3, :3] = rot.as_matrix()
             # apply normal alignment
-            b2a_mat = normal_mat @ scale_mat @ flip_mat @ extrinsics_base[0]
+            b2a_mat = normal_mat @ flip_mat @ extrinsics_base[0]
 
             # write alignment data as NPZ format
             alignment_path = os.path.join(temp_dir, "alignment.npz")
             extrinsics = extrinsics_base @ np.linalg.inv(b2a_mat)
-            np.savez_compressed(
-                alignment_path,
-                b2a_mat=b2a_mat,
-                extrinsics=extrinsics,
-                intrinsics=intrinsics,
-                images_rgb=images_rgb,
-                masks_bool=masks_bool
-            )
-
-            # [DEBUG] aligned trajectory
-            fig_path = os.path.join(temp_dir, "trajectory.png")
-            utils.alignment.plot_path(fig_path, path_base, path_metric)
+            np.savez_compressed(alignment_path, b2a_mat=b2a_mat, extrinsics=extrinsics, intrinsics=intrinsics, images_rgb=images_rgb, masks_bool=masks_bool)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
             shutil.move(alignment_path, output.open())
-            shutil.move(fig_path, output.open())  # [DEBUG]
 
 
 class SurfaceTask(luigi.Task):
@@ -161,7 +127,7 @@ class SurfaceTask(luigi.Task):
 
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()  # [0.0, 1.0]
     max_depth: luigi.FloatParameter = luigi.FloatParameter()  # [m]
-    voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [0.0, 1.0]
+    voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [m]
 
     def requires(self) -> list[luigi.Task]:
         tracking = tasks.object_masking.TrackingTask(
@@ -291,9 +257,8 @@ class SurfaceTask(luigi.Task):
             pcd_surface = o3d.geometry.PointCloud()
             pcd_surface.points = o3d.utility.Vector3dVector(points)
             pcd_surface.colors = o3d.utility.Vector3dVector(colors)
-            bound = pcd_surface.get_max_bound() - pcd_surface.get_min_bound()
-            voxel_size = max(bound[0], bound[1], bound[2]) * self.voxel_downsample
-            pcd_surface = pcd_surface.voxel_down_sample(voxel_size)
+            if self.voxel_downsample > 0.0:
+                pcd_surface = pcd_surface.voxel_down_sample(self.voxel_downsample)
 
             # project trackings to thin-plate-spline
             all_centers = utils.alignment.project_tracking_to_tps(
@@ -305,7 +270,7 @@ class SurfaceTask(luigi.Task):
             )
             all_results = []
             for centers, labels in zip(all_centers, all_labels, strict=True):
-                all_results.append({ "centers": centers, "labels": labels })
+                all_results.append({"centers": centers, "labels": labels})
 
             # write points as PLY format
             object_path = os.path.join(temp_dir, "object.ply")
