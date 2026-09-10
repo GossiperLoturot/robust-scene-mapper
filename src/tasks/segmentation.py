@@ -59,12 +59,7 @@ class SegmentationTask(luigi.Task):
             utils.segmentation.concept_segmentation(image_dir, concept_seg_dir, utils.segmentation.CONCEPT_CATEGORIES)
 
             ctx.logger.info("merging results")
-            utils.segmentation.merge_segmentation(
-                image_dir,
-                semantic_seg_dir,
-                concept_seg_dir,
-                segmentation_dir
-            )
+            utils.segmentation.merge_segmentation(image_dir, semantic_seg_dir, concept_seg_dir, segmentation_dir)
             num_seg = num_semantic_seg + num_concept_seg
             ctx.logger.info(f"segmentation completed: {num_seg} categories")
 
@@ -130,23 +125,7 @@ class LiftingTask(luigi.Task):
             init_frame_height=self.init_frame_height,
             init_focal_length=self.init_focal_length,
         )
-        surface = tasks.alignment.SurfaceTask(
-            input_path=self.input_path,
-            fps=self.fps,
-            width=self.width,
-            height=self.height,
-            max_keypoints=self.max_keypoints,
-            width_confidence=self.width_confidence,
-            depth_confidence=self.depth_confidence,
-            init_frame_width=self.init_frame_width,
-            init_frame_height=self.init_frame_height,
-            init_focal_length=self.init_focal_length,
-            highres_width=self.highres_width,
-            highres_height=self.highres_height,
-            ransac_threshold=self.ransac_threshold,
-            max_depth=self.max_depth,
-            voxel_downsample=self.voxel_downsample
-        )
+        surface = tasks.alignment.SurfaceTask(input_path=self.input_path, fps=self.fps, width=self.width, height=self.height, max_keypoints=self.max_keypoints, width_confidence=self.width_confidence, depth_confidence=self.depth_confidence, init_frame_width=self.init_frame_width, init_frame_height=self.init_frame_height, init_focal_length=self.init_focal_length, highres_width=self.highres_width, highres_height=self.highres_height, ransac_threshold=self.ransac_threshold, max_depth=self.max_depth, voxel_downsample=self.voxel_downsample)
         return [segmentation, object_masking, reconstruction, alignment, surface]
 
     def output(self) -> list[luigi.Target]:

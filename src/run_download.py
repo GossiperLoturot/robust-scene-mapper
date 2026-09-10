@@ -22,7 +22,6 @@ def main() -> None:
     logger.setLevel(logging.INFO)
     logger.addHandler(handler)
 
-
     logger.info("download DISK weights")
     kornia.feature.DISK.from_pretrained("depth")
 
@@ -42,10 +41,7 @@ def main() -> None:
     transformers.RfDetrImageProcessor.from_pretrained("roboflow/rf-detr-large", device_map="auto")
 
     logger.info("download Depth Anything 3 weights")
-    with subprocess.Popen(
-        ["uv", "run", "hf", "download", "depth-anything/DA3NESTED-GIANT-LARGE-1.1"], cwd="deps/depth-anything-3",
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-    ) as proc:
+    with subprocess.Popen(["uv", "run", "hf", "download", "depth-anything/DA3NESTED-GIANT-LARGE-1.1"], cwd="deps/depth-anything-3", stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as proc:
         if proc.stdout:
             for line in proc.stdout:
                 console.print(line, end="")

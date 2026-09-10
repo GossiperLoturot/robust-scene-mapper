@@ -1,6 +1,5 @@
 global:
   database_dir: "./tasks/"
-  export_dir: "./exports/"
   retry_count: 8
 
 dispatch:

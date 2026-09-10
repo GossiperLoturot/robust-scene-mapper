@@ -11,27 +11,7 @@ import transformers
 
 import context
 
-CITYSCAPE_CATEGORIES = [
-    "road",
-    "sidewalk",
-    "building",
-    "wall",
-    "fence",
-    "pole",
-    "traffic light",
-    "traffic sign",
-    "vegetation",
-    "terrain",
-    "sky",
-    "person",
-    "rider",
-    "car",
-    "truck",
-    "bus",
-    "train",
-    "motorcycle",
-    "bicycle"
-]
+CITYSCAPE_CATEGORIES = ["road", "sidewalk", "building", "wall", "fence", "pole", "traffic light", "traffic sign", "vegetation", "terrain", "sky", "person", "rider", "car", "truck", "bus", "train", "motorcycle", "bicycle"]
 
 CONCEPT_CATEGORIES = [
     "lane markings",
@@ -167,12 +147,7 @@ def concept_segmentation(image_dir: str, output_dir: str, texts: list[str]) -> N
                     text_embeds=text_embed,
                     attention_mask=text_inputs.attention_mask,
                 )
-                results = processor.post_process_instance_segmentation(
-                    outputs,
-                    threshold=0.25,
-                    mask_threshold=0.25,
-                    target_sizes=vision_inputs.get("original_sizes").tolist()
-                )[0]
+                results = processor.post_process_instance_segmentation(outputs, threshold=0.25, mask_threshold=0.25, target_sizes=vision_inputs.get("original_sizes").tolist())[0]
 
                 seg = results["masks"].cpu().numpy()
                 seg = np.clip(np.sum(seg, axis=0), 0.0, 1.0)

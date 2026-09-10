@@ -9,27 +9,7 @@ import transformers
 
 import context
 
-ALL_CATEGORIES = [
-    "road",
-    "sidewalk",
-    "building",
-    "wall",
-    "fence",
-    "pole",
-    "traffic light",
-    "traffic sign",
-    "vegetation",
-    "terrain",
-    "sky",
-    "person",
-    "rider",
-    "car",
-    "truck",
-    "bus",
-    "train",
-    "motorcycle",
-    "bicycle"
-]
+ALL_CATEGORIES = ["road", "sidewalk", "building", "wall", "fence", "pole", "traffic light", "traffic sign", "vegetation", "terrain", "sky", "person", "rider", "car", "truck", "bus", "train", "motorcycle", "bicycle"]
 STATIC_CATEGORIES = [
     "road",
     "sidewalk",
@@ -123,7 +103,7 @@ def object_detection(images_rgb: np.ndarray, output_path: str) -> None:
                 label = model.config.id2label[label_id.item()]
                 boxes.append(box.tolist())
                 labels.append(label)
-            all_results.append({ "boxes": boxes, "labels": labels })
+            all_results.append({"boxes": boxes, "labels": labels})
 
         np.savez_compressed(output_path, all_results=all_results)
 

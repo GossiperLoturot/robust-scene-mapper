@@ -131,7 +131,7 @@ def extract_feature_and_match(
             lafs_dict[i] = lafs[valid_mask].detach().clone()
 
         ctx.logger.info("Feature matching...")
-        model_lg = kornia.feature.LightGlueMatcher("disk", { "depth_confidence": depth_confidence, "width_confidence": width_confidence }).to(device).eval()
+        model_lg = kornia.feature.LightGlueMatcher("disk", {"depth_confidence": depth_confidence, "width_confidence": width_confidence}).to(device).eval()
         for i, j in matching_pairs.pair_indices:
             _, matches = model_lg(descriptors_dict[i], descriptors_dict[j], lafs_dict[i][None, ...], lafs_dict[j][None, ...], hw1=image_sizes[i], hw2=image_sizes[j])
             matches_dict[(i, j)] = matches.detach().cpu().numpy().astype(np.int32)

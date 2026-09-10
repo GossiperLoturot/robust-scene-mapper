@@ -136,9 +136,11 @@ def project_points_to_tps(
         camera_w, rays_w = c2w[:3, 3], c2w[:3, :3] @ rays  # (3, M) world camera position, (3, M) world ray direction
 
         depth_init = np.ones(rays_w.shape[1]) * init_depth  # (M,) initial depth
+
         def _obj_fn(depth: np.ndarray, camera_w: np.ndarray, rays_w: np.ndarray) -> np.ndarray:
             xyz = (camera_w[:, np.newaxis] + depth[np.newaxis, :] * rays_w).T
             return xyz[:, 1] - model(xyz[:, [0, 2]])
+
         obj_fn = functools.partial(_obj_fn, camera_w=camera_w, rays_w=rays_w)
         depth_opt = scipy.optimize.newton(obj_fn, depth_init)
         assert isinstance(depth_opt, np.ndarray)
@@ -189,9 +191,11 @@ def project_tracking_to_tps(
         camera_w, rays_w = c2w[:3, 3], c2w[:3, :3] @ rays  # (3, M) world camera position, (3, M) world ray direction
 
         depth_init = np.ones(rays_w.shape[1]) * init_depth  # (M,) initial depth
+
         def _obj_fn(depth: np.ndarray, camera_w: np.ndarray, rays_w: np.ndarray) -> np.ndarray:
             xyz = (camera_w[:, np.newaxis] + depth[np.newaxis, :] * rays_w).T
             return xyz[:, 1] - model(xyz[:, [0, 2]])
+
         obj_fn = functools.partial(_obj_fn, camera_w=camera_w, rays_w=rays_w)
         depth_opt = scipy.optimize.newton(obj_fn, depth_init)
         assert isinstance(depth_opt, np.ndarray)

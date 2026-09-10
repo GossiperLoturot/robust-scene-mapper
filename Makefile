@@ -1,4 +1,4 @@
-.PHONY: build check fix download run
+.PHONY: build check fix run_download run_reconstruct run_surface run_lifting
 
 build:
 	@uv sync
@@ -13,8 +13,14 @@ fix:
 	@uv run ruff check --fix .
 	@uv run ruff format .
 
-download:
-	@uv run src/download.py
+run_download:
+	@uv run src/run_download.py
 
-run:
-	@uv run src/main.py
+run_reconstruct:
+	@uv run src/run_reconstruct.py
+
+run_surface:
+	@uv run src/run_surface.py
+
+run_lifting:
+	@uv run src/run_lifting.py

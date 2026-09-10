@@ -64,13 +64,23 @@ class DepthTask(luigi.Task):
             ctx.logger.info("estimate depth by Depth Anything 3")
             with subprocess.Popen(
                 [
-                    "uv", "run", "da3", "auto", undistort_dir,
-                    "--export-dir", depth_dir,
-                    "--export-format", "npz",
-                    "--process-res", "256",
+                    "uv",
+                    "run",
+                    "da3",
+                    "auto",
+                    undistort_dir,
+                    "--export-dir",
+                    depth_dir,
+                    "--export-format",
+                    "npz",
+                    "--process-res",
+                    "256",
                     "--no-align-to-input-ext-scale",
-                ], cwd="deps/depth-anything-3",
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                ],
+                cwd="deps/depth-anything-3",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
             ) as proc:
                 if proc.stdout:
                     for line in proc.stdout:
