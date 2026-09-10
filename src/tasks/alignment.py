@@ -9,7 +9,6 @@ import pycolmap
 import scipy.spatial.transform
 
 import context
-import tasks.depth
 import tasks.multiview_stereo
 import tasks.object_masking
 import tasks.reconstruction
