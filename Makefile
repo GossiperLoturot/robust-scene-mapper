@@ -2,7 +2,6 @@
 
 build:
 	@uv sync
-	@cd deps/depth-anything-3 && uv sync
 
 check:
 	@uv run ruff check .
