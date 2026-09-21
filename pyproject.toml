@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-lifting-seg = { path = "deps/lifting-seg" }
+lifting-seg = { path = "third_party/lifting-seg" }
 
 [tool.ruff]
 target-version = "py312"

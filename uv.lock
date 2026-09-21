@@ -3,8 +3,8 @@ revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
-    "python_full_version < '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform != 'win32'",
+    "python_full_version < '3.14' and sys_platform == 'win32'",
     "python_full_version < '3.14' and sys_platform != 'win32'",
 ]
 
@@ -947,7 +947,7 @@ wheels = [
 
 [[package]]
 name = "lifting-seg"
-source = { directory = "deps/lifting-seg" }
+source = { directory = "third_party/lifting-seg" }
 
 [[package]]
 name = "lockfile"
@@ -2093,7 +2093,7 @@ requires-dist = [
     { name = "evo", specifier = ">=1.36.5" },
     { name = "h5py", specifier = ">=3.16.0" },
     { name = "kornia", specifier = ">=0.8.1" },
-    { name = "lifting-seg", directory = "deps/lifting-seg" },
+    { name = "lifting-seg", directory = "third_party/lifting-seg" },
     { name = "luigi", specifier = ">=3.8.1" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "open3d", specifier = ">=0.19.0" },
