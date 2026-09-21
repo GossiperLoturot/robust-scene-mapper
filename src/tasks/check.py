@@ -8,7 +8,6 @@ import pycolmap
 
 import context
 import tasks.alignment
-import tasks.depth
 import tasks.multiview_stereo
 import tasks.object_masking
 import tasks.reconstruction
@@ -88,12 +87,12 @@ class ReconstructCheckTask(luigi.Task):
         ego_images = np.array(images_rgb, dtype=np.uint8)
 
         model = pycolmap.Reconstruction(model_dir)
-        xyz, rgb = [], []
+        pcd_xyz, pcd_rgb = [], []
         for i in model.points3D:
-            xyz.append(model.points3D[i].xyz)
-            rgb.append(model.points3D[i].color)
-        xyz = np.asarray(xyz, dtype=np.float32)
-        rgb = np.asarray(rgb, dtype=np.float32)
+            pcd_xyz.append(model.points3D[i].xyz)
+            pcd_rgb.append(model.points3D[i].color)
+        pcd_xyz = np.asarray(pcd_xyz, dtype=np.float32)
+        pcd_rgb = np.asarray(pcd_rgb, dtype=np.uint8)
 
         ctx.logger.info("writing output to database")
         [output] = self.output()
@@ -104,8 +103,8 @@ class ReconstructCheckTask(luigi.Task):
             f.create_dataset("ego_xyz", data=ego_xyz, dtype=np.float32, compression="gzip")
             f.create_dataset("ego_images", data=ego_images, dtype=np.uint8, compression="gzip")
 
-            f.create_dataset("xyz", data=xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("rgb", data=rgb, dtype=np.float32, compression="gzip")
+            f.create_dataset("pcd_xyz", data=pcd_xyz, dtype=np.float32, compression="gzip")
+            f.create_dataset("pcd_rgb", data=pcd_rgb, dtype=np.uint8, compression="gzip")
 
 
 class SurfaceCheckTask(luigi.Task):
@@ -189,10 +188,14 @@ class SurfaceCheckTask(luigi.Task):
         alt_frames = np.array(alt_frames, dtype=np.int32)
         alt_xyz = np.concat(alt_xyz, axis=0).astype(np.float32)
         alt_labels = np.concat(alt_labels, axis=0, dtype="T")
+        alt_typename, alt_typemap = np.unique(alt_labels, return_inverse=True)
+        alt_typemap = alt_typemap.astype(np.uint8)
+        alt_typename = np.array(alt_typename, dtype="T")
 
         pcd = o3d.io.read_point_cloud(surface_path)
-        xyz = np.asarray(pcd.points, dtype=np.float32)
-        rgb = np.asarray(pcd.colors, dtype=np.float32)
+        pcd_xyz = np.asarray(pcd.points, dtype=np.float32)
+        pcd_rgb = np.asarray(pcd.colors, dtype=np.float32)
+        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
 
         ctx.logger.info("writing output to database")
         [output] = self.output()
@@ -205,10 +208,11 @@ class SurfaceCheckTask(luigi.Task):
 
             f.create_dataset("alt_frames", data=alt_frames, dtype=np.int32, compression="gzip")
             f.create_dataset("alt_xyz", data=alt_xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("alt_labels", data=alt_labels, dtype=h5py.string_dtype(), compression="gzip")
+            f.create_dataset("alt_typemap", data=alt_typemap, dtype=np.uint8, compression="gzip")
+            f.create_dataset("alt_typename", data=alt_typename, dtype=h5py.string_dtype(), compression="gzip")
 
-            f.create_dataset("xyz", data=xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("rgb", data=rgb, dtype=np.float32, compression="gzip")
+            f.create_dataset("pcd_xyz", data=pcd_xyz, dtype=np.float32, compression="gzip")
+            f.create_dataset("pcd_rgb", data=pcd_rgb, dtype=np.uint8, compression="gzip")
 
 
 class LiftingCheckTask(luigi.Task):
@@ -312,17 +316,21 @@ class LiftingCheckTask(luigi.Task):
         alt_frames = np.array(alt_frames, dtype=np.int32)
         alt_xyz = np.concat(alt_xyz, axis=0).astype(np.float32)
         alt_labels = np.concat(alt_labels, axis=0, dtype="T")
+        alt_typename, alt_typemap = np.unique(alt_labels, return_inverse=True)
+        alt_typemap = alt_typemap.astype(np.uint8)
+        alt_typename = np.array(alt_typename, dtype="T")
 
         pcd = o3d.io.read_point_cloud(surface_path)
-        xyz = np.asarray(pcd.points, dtype=np.float32)
-        rgb = np.asarray(pcd.colors, dtype=np.float32)
+        pcd_xyz = np.asarray(pcd.points, dtype=np.float32)
+        pcd_rgb = np.asarray(pcd.colors, dtype=np.float32)
+        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
 
         lifting = np.load(lifting_path)
         feats = lifting["feats"]  # (N, M) where N is the number of points and M is the number of features
         feats = np.argmax(feats, axis=1)  # (N,) where each value is the index of the max feature
         feats[np.max(feats) == 0.0] = len(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES) - 1  # set all zero features to `unknown`
-        feats = feats.astype(np.uint8)
-        feats_labels = np.array(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES, dtype="T")
+        pcd_typemap = feats.astype(np.uint8)
+        pcd_typename = np.array(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES, dtype="T")
 
         ctx.logger.info("writing output to database")
         [output] = self.output()
@@ -335,10 +343,10 @@ class LiftingCheckTask(luigi.Task):
 
             f.create_dataset("alt_frames", data=alt_frames, dtype=np.int32, compression="gzip")
             f.create_dataset("alt_xyz", data=alt_xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("alt_labels", data=alt_labels, dtype=h5py.string_dtype(), compression="gzip")
+            f.create_dataset("alt_typemap", data=alt_typemap, dtype=np.uint8, compression="gzip")
+            f.create_dataset("alt_typename", data=alt_typename, dtype=h5py.string_dtype(), compression="gzip")
 
-            f.create_dataset("xyz", data=xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("rgb", data=rgb, dtype=np.float32, compression="gzip")
-
-            f.create_dataset("feats", data=feats, dtype=np.uint8, compression="gzip")
-            f.create_dataset("feats_labels", data=feats_labels, dtype=h5py.string_dtype(), compression="gzip")
+            f.create_dataset("pcd_xyz", data=pcd_xyz, dtype=np.float32, compression="gzip")
+            f.create_dataset("pcd_rgb", data=pcd_rgb, dtype=np.float32, compression="gzip")
+            f.create_dataset("pcd_typemap", data=pcd_typemap, dtype=np.uint8, compression="gzip")
+            f.create_dataset("pcd_typename", data=pcd_typename, dtype=h5py.string_dtype(), compression="gzip")
