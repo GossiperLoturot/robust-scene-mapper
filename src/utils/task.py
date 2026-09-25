@@ -1,11 +1,11 @@
 import contextlib
 import hashlib
+import io
 import json
 import os
 import typing
 
 import backports.zstd.tarfile as tarfile
-import h5py
 import luigi
 
 
@@ -72,7 +72,7 @@ class FsArchiveTarget(luigi.Target):
             yield archive
 
 
-class HDF5Target(luigi.Target):
+class MsgpackTarget(luigi.Target):
     database_dir: str
     basename: str
 
@@ -82,7 +82,7 @@ class HDF5Target(luigi.Target):
         task_name = task.__class__.__name__
         params_json = json.dumps(task.param_kwargs, sort_keys=True)
         hexdigest = hashlib.md5(params_json.encode()).hexdigest()
-        basename = f"{task_name}_{hexdigest}.h5"
+        basename = f"{task_name}_{hexdigest}.msgpack"
 
         self.database_dir = database_dir
         self.basename = basename
@@ -92,14 +92,14 @@ class HDF5Target(luigi.Target):
         return os.path.exists(target_path)
 
     @contextlib.contextmanager
-    def open(self) -> typing.Generator[h5py.File, None, None]:
+    def open(self) -> typing.Generator[io.BufferedWriter, None, None]:
         target_path = os.path.join(self.database_dir, self.basename)
-        with h5py.File(target_path, "w") as h5file:
-            yield h5file
+        with open(target_path, "wb") as f:
+            yield f
 
     @contextlib.contextmanager
-    def read(self) -> typing.Generator[h5py.File, None, None]:
+    def read(self) -> typing.Generator[io.BufferedReader, None, None]:
         target_path = os.path.join(self.database_dir, self.basename)
         assert os.path.exists(target_path), f"target does not exist: {target_path}"
-        with h5py.File(target_path, "r") as h5file:
-            yield h5file
+        with open(target_path, "rb") as f:
+            yield f

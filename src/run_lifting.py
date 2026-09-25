@@ -9,7 +9,7 @@ import luigi
 import yaml
 
 import context
-import tasks.check
+import tasks.commit
 
 
 class DispatchTask(luigi.WrapperTask):
@@ -33,7 +33,7 @@ class DispatchTask(luigi.WrapperTask):
     def requires(self) -> list[luigi.Task]:
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.check.LiftingCheckTask(
+            task = tasks.commit.LiftingCommitTask(
                 input_path=input_path,
                 fps=self.fps,
                 width=self.width,
