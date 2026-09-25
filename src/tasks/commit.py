@@ -1,7 +1,8 @@
 import os
 
-import h5py
+import cv2
 import luigi
+import msgpack
 import numpy as np
 import open3d as o3d
 import pycolmap
@@ -19,7 +20,7 @@ import utils.segmentation
 import utils.task
 
 
-class ReconstructCheckTask(luigi.Task):
+class ReconstructCommitTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -54,7 +55,7 @@ class ReconstructCheckTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.HDF5Target(ctx.database_dir, self)]
+        return [utils.task.MsgpackTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -82,32 +83,39 @@ class ReconstructCheckTask(luigi.Task):
         for i in range(len(extrinsics)):
             xyz = np.linalg.inv(extrinsics[i])[:3, 3]
             ego_xyz.append(xyz)
-        ego_frames = np.arange(len(ego_xyz), dtype=np.int32)
-        ego_xyz = np.array(ego_xyz, dtype=np.float32)
-        ego_images = np.array(images_rgb, dtype=np.uint8)
+        ego_frames = np.arange(len(ego_xyz), dtype=np.int32).tobytes()
+        ego_xyz = np.concat(ego_xyz, dtype=np.float32).tobytes()
+        bimages_rgb = list[bytes]()
+        for image_rgb in images_rgb:
+            _, bimage_rgb = cv2.imencode(".png", cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+            bimage_rgb = bimage_rgb.tobytes()
+            bimages_rgb.append(bimage_rgb)
+        ego_images = bimages_rgb
 
         model = pycolmap.Reconstruction(model_dir)
         pcd_xyz, pcd_rgb = [], []
         for i in model.points3D:
             pcd_xyz.append(model.points3D[i].xyz)
             pcd_rgb.append(model.points3D[i].color)
-        pcd_xyz = np.asarray(pcd_xyz, dtype=np.float32)
-        pcd_rgb = np.asarray(pcd_rgb, dtype=np.uint8)
+        pcd_xyz = np.array(pcd_xyz, dtype=np.float32).tobytes()
+        pcd_rgb = np.array(pcd_rgb, dtype=np.uint8).tobytes()
 
+        # save as native byteorder.
+        data = {
+            "param": self.param_kwargs,
+            "ego_frames": ego_frames,
+            "ego_xyz": ego_xyz,
+            "ego_images": ego_images,
+            "pcd_xyz": pcd_xyz,
+            "pcd_rgb": pcd_rgb,
+        }
         ctx.logger.info("writing output to database")
         [output] = self.output()
         with output.open() as f:
-            f.attrs.update(self.param_kwargs)
-
-            f.create_dataset("ego_frames", data=ego_frames, dtype=np.int32, compression="gzip")
-            f.create_dataset("ego_xyz", data=ego_xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("ego_images", data=ego_images, dtype=np.uint8, compression="gzip")
-
-            f.create_dataset("pcd_xyz", data=pcd_xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("pcd_rgb", data=pcd_rgb, dtype=np.uint8, compression="gzip")
+            msgpack.pack(data, f, use_bin_type=True)
 
 
-class SurfaceCheckTask(luigi.Task):
+class SurfaceCommitTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -158,7 +166,7 @@ class SurfaceCheckTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.HDF5Target(ctx.database_dir, self)]
+        return [utils.task.MsgpackTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -174,9 +182,14 @@ class SurfaceCheckTask(luigi.Task):
         for i in range(len(extrinsics)):
             xyz = np.linalg.inv(extrinsics[i])[:3, 3]
             ego_xyz.append(xyz)
-        ego_frames = np.arange(len(ego_xyz), dtype=np.int32)
-        ego_xyz = np.array(ego_xyz, dtype=np.float32)
-        ego_images = np.array(alignment_result["images_rgb"], dtype=np.uint8)
+        ego_frames = np.arange(len(ego_xyz), dtype=np.int32).tobytes()
+        ego_xyz = np.array(ego_xyz, dtype=np.float32).tobytes()
+        bimages_rgb = list[bytes]()
+        for image_rgb in alignment_result["images_rgb"]:
+            _, bimage_rgb = cv2.imencode(".png", cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+            bimage_rgb = bimage_rgb.tobytes()
+            bimages_rgb.append(bimage_rgb)
+        ego_images = bimages_rgb
 
         alt_frames, alt_xyz, alt_labels = [], [], []
         tracking = np.load(tracking_path, allow_pickle=True)
@@ -185,37 +198,37 @@ class SurfaceCheckTask(luigi.Task):
             alt_frames.append(i)
             alt_xyz.append(xyz)
             alt_labels.append(labels)
-        alt_frames = np.array(alt_frames, dtype=np.int32)
-        alt_xyz = np.concat(alt_xyz, axis=0).astype(np.float32)
-        alt_labels = np.concat(alt_labels, axis=0, dtype="T")
+        alt_frames = np.array(alt_frames, dtype=np.int32).tobytes()
+        alt_xyz = np.concat(alt_xyz, axis=0, dtype=np.float32).tobytes()
+        alt_labels = np.concat(alt_labels, axis=0, dtype=np.dtypes.StringDType())
         alt_typename, alt_typemap = np.unique(alt_labels, return_inverse=True)
-        alt_typemap = alt_typemap.astype(np.uint8)
-        alt_typename = np.array(alt_typename, dtype="T")
+        alt_typemap = alt_typemap.astype(np.uint8).tobytes()
+        alt_typename = alt_typename.tolist()
 
         pcd = o3d.io.read_point_cloud(surface_path)
-        pcd_xyz = np.asarray(pcd.points, dtype=np.float32)
-        pcd_rgb = np.asarray(pcd.colors, dtype=np.float32)
-        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
+        pcd_xyz = np.array(pcd.points, dtype=np.float32).tobytes()
+        pcd_rgb = np.array(pcd.colors, dtype=np.float32)
+        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8).tobytes()
 
+        data = {
+            "param": self.param_kwargs,
+            "ego_frames": ego_frames,
+            "ego_xyz": ego_xyz,
+            "ego_images": ego_images,
+            "alt_frames": alt_frames,
+            "alt_xyz": alt_xyz,
+            "alt_typemap": alt_typemap,
+            "alt_typename": alt_typename,
+            "pcd_xyz": pcd_xyz,
+            "pcd_rgb": pcd_rgb,
+        }
         ctx.logger.info("writing output to database")
         [output] = self.output()
         with output.open() as f:
-            f.attrs.update(self.param_kwargs)
-
-            f.create_dataset("ego_frames", data=ego_frames, dtype=np.int32, compression="gzip")
-            f.create_dataset("ego_xyz", data=ego_xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("ego_images", data=ego_images, dtype=np.uint8, compression="gzip")
-
-            f.create_dataset("alt_frames", data=alt_frames, dtype=np.int32, compression="gzip")
-            f.create_dataset("alt_xyz", data=alt_xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("alt_typemap", data=alt_typemap, dtype=np.uint8, compression="gzip")
-            f.create_dataset("alt_typename", data=alt_typename, dtype=h5py.string_dtype(), compression="gzip")
-
-            f.create_dataset("pcd_xyz", data=pcd_xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("pcd_rgb", data=pcd_rgb, dtype=np.uint8, compression="gzip")
+            msgpack.pack(data, f, use_bin_type=True)
 
 
-class LiftingCheckTask(luigi.Task):
+class LiftingCommitTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -285,7 +298,7 @@ class LiftingCheckTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.HDF5Target(ctx.database_dir, self)]
+        return [utils.task.MsgpackTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -302,9 +315,14 @@ class LiftingCheckTask(luigi.Task):
         for i in range(len(extrinsics)):
             xyz = np.linalg.inv(extrinsics[i])[:3, 3]
             ego_xyz.append(xyz)
-        ego_frames = np.arange(len(ego_xyz), dtype=np.int32)
-        ego_xyz = np.array(ego_xyz, dtype=np.float32)
-        ego_images = np.array(alignment_result["images_rgb"], dtype=np.uint8)
+        ego_frames = np.arange(len(ego_xyz), dtype=np.int32).tobytes()
+        ego_xyz = np.array(ego_xyz, dtype=np.float32).tobytes()
+        bimages_rgb = list[bytes]()
+        for image_rgb in alignment_result["images_rgb"]:
+            _, bimage_rgb = cv2.imencode(".png", cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+            bimage_rgb = bimage_rgb.tobytes()
+            bimages_rgb.append(bimage_rgb)
+        ego_images = bimages_rgb
 
         alt_frames, alt_xyz, alt_labels = [], [], []
         tracking = np.load(tracking_path, allow_pickle=True)
@@ -313,40 +331,40 @@ class LiftingCheckTask(luigi.Task):
             alt_frames.append(i)
             alt_xyz.append(xyz)
             alt_labels.append(labels)
-        alt_frames = np.array(alt_frames, dtype=np.int32)
-        alt_xyz = np.concat(alt_xyz, axis=0).astype(np.float32)
-        alt_labels = np.concat(alt_labels, axis=0, dtype="T")
+        alt_frames = np.array(alt_frames, dtype=np.int32).tobytes()
+        alt_xyz = np.concat(alt_xyz, axis=0, dtype=np.float32).tobytes()
+        alt_labels = np.concat(alt_labels, axis=0, dtype=np.dtypes.StringDType())
         alt_typename, alt_typemap = np.unique(alt_labels, return_inverse=True)
-        alt_typemap = alt_typemap.astype(np.uint8)
-        alt_typename = np.array(alt_typename, dtype="T")
+        alt_typemap = alt_typemap.astype(np.uint8).tobytes()
+        alt_typename = alt_typename.tolist()
 
         pcd = o3d.io.read_point_cloud(surface_path)
-        pcd_xyz = np.asarray(pcd.points, dtype=np.float32)
-        pcd_rgb = np.asarray(pcd.colors, dtype=np.float32)
-        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
+        pcd_xyz = np.array(pcd.points, dtype=np.float32).tobytes()
+        pcd_rgb = np.array(pcd.colors, dtype=np.float32)
+        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8).tobytes()
 
         lifting = np.load(lifting_path)
         feats = lifting["feats"]  # (N, M) where N is the number of points and M is the number of features
         feats = np.argmax(feats, axis=1)  # (N,) where each value is the index of the max feature
         feats[np.max(feats) == 0.0] = len(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES) - 1  # set all zero features to `unknown`
-        pcd_typemap = feats.astype(np.uint8)
-        pcd_typename = np.array(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES, dtype="T")
+        pcd_typemap = feats.astype(np.uint8).tobytes()
+        pcd_typename = utils.segmentation.CITYSCAPE_PLUS_CATEGORIES
 
+        data = {
+            "param": self.param_kwargs,
+            "ego_frames": ego_frames,
+            "ego_xyz": ego_xyz,
+            "ego_images": ego_images,
+            "alt_frames": alt_frames,
+            "alt_xyz": alt_xyz,
+            "alt_typemap": alt_typemap,
+            "alt_typename": alt_typename,
+            "pcd_xyz": pcd_xyz,
+            "pcd_rgb": pcd_rgb,
+            "pcd_typemap": pcd_typemap,
+            "pcd_typename": pcd_typename,
+        }
         ctx.logger.info("writing output to database")
         [output] = self.output()
         with output.open() as f:
-            f.attrs.update(self.param_kwargs)
-
-            f.create_dataset("ego_frames", data=ego_frames, dtype=np.int32, compression="gzip")
-            f.create_dataset("ego_xyz", data=ego_xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("ego_images", data=ego_images, dtype=np.uint8, compression="gzip")
-
-            f.create_dataset("alt_frames", data=alt_frames, dtype=np.int32, compression="gzip")
-            f.create_dataset("alt_xyz", data=alt_xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("alt_typemap", data=alt_typemap, dtype=np.uint8, compression="gzip")
-            f.create_dataset("alt_typename", data=alt_typename, dtype=h5py.string_dtype(), compression="gzip")
-
-            f.create_dataset("pcd_xyz", data=pcd_xyz, dtype=np.float32, compression="gzip")
-            f.create_dataset("pcd_rgb", data=pcd_rgb, dtype=np.float32, compression="gzip")
-            f.create_dataset("pcd_typemap", data=pcd_typemap, dtype=np.uint8, compression="gzip")
-            f.create_dataset("pcd_typename", data=pcd_typename, dtype=h5py.string_dtype(), compression="gzip")
+            msgpack.pack(data, f, use_bin_type=True)
