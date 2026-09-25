@@ -198,7 +198,7 @@ class LiftingTask(luigi.Task):
                 xyz.astype(np.float64),
                 kernel_radius,
             )
-            ctx.logger.info(f"ray feats {xyz_feats.shape}")
+            ctx.logger.info(f"xyz feats {xyz_feats.shape}")
 
             # write points as npz format
             xyz_feats_path = os.path.join(temp_dir, "xyz_feats.npz")
