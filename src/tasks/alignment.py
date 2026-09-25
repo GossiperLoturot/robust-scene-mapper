@@ -216,19 +216,17 @@ class SurfaceTask(luigi.Task):
                 boxes = results["boxes"]
                 labels = results["labels"]
                 available_centers, available_labels = [], []
-                for j in range(len(boxes)):
-                    box = boxes[j]
-                    label = labels[j]
+                for box, label in zip(boxes, labels, strict=True):
                     if label not in utils.object_masking.COCO_RU_CATEGORIES:  # extract road users
                         continue
                     bottom_center = np.array([(box[0] + box[2]) * 0.5, box[3]])
                     if bottom_center[1] > utils.object_masking.EGO_VEHICLE_HLINE:  # ignore ego-vehicle
                         continue
-                    bottom_center *= np.array([width, height])  # normalize to undistored pixel coordinates
+                    bottom_center = bottom_center * np.array([width, height])  # normalize to undistored pixel coordinates
                     available_centers.append(bottom_center)
                     available_labels.append(label)
-                all_centers.append(np.array(available_centers).reshape(-1, 2))  # (N, 2)
-                all_labels.append(available_labels)
+                all_centers.append(np.array(available_centers, dtype=np.float32))  # (N, 2)
+                all_labels.append(np.array(available_labels, dtype=np.dtypes.StringDType()))  # (N)
             ctx.logger.info(f"tracking points: {sum([len(c) for c in all_centers])}")
 
             # detect thin plate spline
@@ -260,10 +258,11 @@ class SurfaceTask(luigi.Task):
                 pcd_surface = pcd_surface.voxel_down_sample(self.voxel_downsample)
 
             # project trackings to thin-plate-spline
-            all_centers = utils.alignment.project_tracking_to_tps(
+            all_centers, all_labels = utils.alignment.project_tracking_to_tps(
                 intrinsics,
                 extrinsics,
                 all_centers,
+                all_labels,
                 model,
                 max_depth=self.max_depth,
             )

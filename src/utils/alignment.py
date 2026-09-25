@@ -88,8 +88,9 @@ def fit_to_tps(
     best_count = 0
     best_model, best_inliers = None, None
 
+    rng = np.random.RandomState(seed=42)
     for _ in rich.progress.track(range(max_iters), description="fit to tps", console=ctx.console):
-        idx = np.random.choice(xyz.shape[0], size=sample_size, replace=False)
+        idx = rng.choice(xyz.shape[0], size=sample_size, replace=False)
         model = scipy.interpolate.RBFInterpolator(
             xyz[idx][:, [0, 2]],
             xyz[idx][:, 1],
@@ -164,23 +165,24 @@ def project_points_to_tps(
 def project_tracking_to_tps(
     k_mat: np.ndarray,
     ext_w2c: np.ndarray,
-    centers_2d: list[np.ndarray],
+    all_centers: list[np.ndarray],
+    all_labels: list[np.ndarray],
     model: scipy.interpolate.RBFInterpolator,
     init_depth: float = 5.0,
     max_depth: float = 10.0,
-) -> list[np.ndarray]:
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
     ctx = context.Context()
 
-    n_dim = len(centers_2d)
-
-    centers_3d = []
-    ctx.logger.info(f"projecting tracking to thin-plate-spline with {n_dim} frames...")
-    for i in rich.progress.track(range(n_dim), total=n_dim, console=ctx.console):
-        if centers_2d[i].shape[0] == 0:
-            centers_3d.append(np.zeros((0, 3)))
+    n_frame = len(all_centers)
+    output_all_centers, output_all_labels = [], []
+    ctx.logger.info(f"projecting tracking to thin-plate-spline with {n_frame} frames...")
+    for i in rich.progress.track(range(n_frame), total=n_frame, console=ctx.console):
+        if all_centers[i].shape[0] == 0:
+            output_all_centers.append(np.zeros((0, 3), dtype=np.float32))
+            output_all_labels.append(np.zeros((0,), dtype=np.dtypes.StringDType()))
             continue
 
-        us, vs = centers_2d[i][:, 0], centers_2d[i][:, 1]
+        us, vs = all_centers[i][:, 0], all_centers[i][:, 1]
         ones = np.ones_like(us)
         centers_home = np.stack([us, vs, ones], axis=-1).reshape(-1, 3)  # (M, 3)
 
@@ -201,10 +203,9 @@ def project_tracking_to_tps(
         assert isinstance(depth_opt, np.ndarray)
 
         centers_w = (camera_w[:, np.newaxis] + depth_opt[np.newaxis, :] * rays_w).T  # (M, 3) centers
+        labels = all_labels[i]  # (M)
 
         post_valid_idx = np.flatnonzero((depth_opt > 0.0) & (depth_opt < max_depth))
-        centers_w = centers_w[post_valid_idx]
-
-        centers_3d.append(centers_w)  # (M, 3)
-
-    return centers_3d
+        output_all_centers.append(centers_w[post_valid_idx])  # (M, 3)
+        output_all_labels.append(labels[post_valid_idx])  # (M)
+    return output_all_centers, output_all_labels

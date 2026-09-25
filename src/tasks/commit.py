@@ -83,31 +83,33 @@ class ReconstructCommitTask(luigi.Task):
         for i in range(len(extrinsics)):
             xyz = np.linalg.inv(extrinsics[i])[:3, 3]
             ego_xyz.append(xyz)
-        ego_frames = np.arange(len(ego_xyz), dtype=np.int32).tobytes()
-        ego_xyz = np.concat(ego_xyz, dtype=np.float32).tobytes()
+        ego_frames = np.arange(len(ego_xyz), dtype=np.int32)
+        ego_xyz = np.array(ego_xyz, dtype=np.float32)
         bimages_rgb = list[bytes]()
         for image_rgb in images_rgb:
             _, bimage_rgb = cv2.imencode(".png", cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
             bimage_rgb = bimage_rgb.tobytes()
             bimages_rgb.append(bimage_rgb)
         ego_images = bimages_rgb
+        ctx.logger.info(f"ego_frames: {ego_frames.shape}, ego_xyz: {ego_xyz.shape}, ego_images: {len(ego_images)}")
 
         model = pycolmap.Reconstruction(model_dir)
         pcd_xyz, pcd_rgb = [], []
         for i in model.points3D:
             pcd_xyz.append(model.points3D[i].xyz)
             pcd_rgb.append(model.points3D[i].color)
-        pcd_xyz = np.array(pcd_xyz, dtype=np.float32).tobytes()
-        pcd_rgb = np.array(pcd_rgb, dtype=np.uint8).tobytes()
+        pcd_xyz = np.array(pcd_xyz, dtype=np.float32)
+        pcd_rgb = np.array(pcd_rgb, dtype=np.uint8)
+        ctx.logger.info(f"pcd_xyz: {pcd_xyz.shape}, pcd_rgb: {pcd_rgb.shape}")
 
         # save as native byteorder.
         data = {
             "param": self.param_kwargs,
-            "ego_frames": ego_frames,
-            "ego_xyz": ego_xyz,
+            "ego_frames": ego_frames.tobytes(),
+            "ego_xyz": ego_xyz.tobytes(),
             "ego_images": ego_images,
-            "pcd_xyz": pcd_xyz,
-            "pcd_rgb": pcd_rgb,
+            "pcd_xyz": pcd_xyz.tobytes(),
+            "pcd_rgb": pcd_rgb.tobytes(),
         }
         ctx.logger.info("writing output to database")
         [output] = self.output()
@@ -182,45 +184,48 @@ class SurfaceCommitTask(luigi.Task):
         for i in range(len(extrinsics)):
             xyz = np.linalg.inv(extrinsics[i])[:3, 3]
             ego_xyz.append(xyz)
-        ego_frames = np.arange(len(ego_xyz), dtype=np.int32).tobytes()
-        ego_xyz = np.array(ego_xyz, dtype=np.float32).tobytes()
+        ego_frames = np.arange(len(ego_xyz), dtype=np.int32)
+        ego_xyz = np.array(ego_xyz, dtype=np.float32)
         bimages_rgb = list[bytes]()
         for image_rgb in alignment_result["images_rgb"]:
             _, bimage_rgb = cv2.imencode(".png", cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
             bimage_rgb = bimage_rgb.tobytes()
             bimages_rgb.append(bimage_rgb)
         ego_images = bimages_rgb
+        ctx.logger.info(f"ego_frames: {ego_frames.shape}, ego_xyz: {ego_xyz.shape}, ego_images: {len(ego_images)}")
 
         alt_frames, alt_xyz, alt_labels = [], [], []
         tracking = np.load(tracking_path, allow_pickle=True)
         for i, results in enumerate(tracking["all_results"]):
             xyz, labels = results["centers"], results["labels"]
-            alt_frames.append(i)
-            alt_xyz.append(xyz)
-            alt_labels.append(labels)
-        alt_frames = np.array(alt_frames, dtype=np.int32).tobytes()
-        alt_xyz = np.concat(alt_xyz, axis=0, dtype=np.float32).tobytes()
-        alt_labels = np.concat(alt_labels, axis=0, dtype=np.dtypes.StringDType())
+            alt_frames.extend([i] * len(xyz))
+            alt_xyz.extend(xyz)
+            alt_labels.extend(labels)
+        alt_frames = np.array(alt_frames, dtype=np.int32)
+        alt_xyz = np.array(alt_xyz, dtype=np.float32)
+        alt_labels = np.array(alt_labels, dtype=np.dtypes.StringDType())
         alt_typename, alt_typemap = np.unique(alt_labels, return_inverse=True)
-        alt_typemap = alt_typemap.astype(np.uint8).tobytes()
+        alt_typemap = alt_typemap.astype(np.uint8)
         alt_typename = alt_typename.tolist()
+        ctx.logger.info(f"alt_frames: {alt_frames.shape}, alt_xyz: {alt_xyz.shape}, alt_typemap: {alt_typemap.shape}, alt_typename: {len(alt_typename)}")
 
         pcd = o3d.io.read_point_cloud(surface_path)
-        pcd_xyz = np.array(pcd.points, dtype=np.float32).tobytes()
+        pcd_xyz = np.array(pcd.points, dtype=np.float32)
         pcd_rgb = np.array(pcd.colors, dtype=np.float32)
-        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8).tobytes()
+        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
+        ctx.logger.info(f"pcd_xyz: {pcd_xyz.shape}, pcd_rgb: {pcd_rgb.shape}")
 
         data = {
             "param": self.param_kwargs,
-            "ego_frames": ego_frames,
-            "ego_xyz": ego_xyz,
+            "ego_frames": ego_frames.tobytes(),
+            "ego_xyz": ego_xyz.tobytes(),
             "ego_images": ego_images,
-            "alt_frames": alt_frames,
-            "alt_xyz": alt_xyz,
-            "alt_typemap": alt_typemap,
+            "alt_frames": alt_frames.tobytes(),
+            "alt_xyz": alt_xyz.tobytes(),
+            "alt_typemap": alt_typemap.tobytes(),
             "alt_typename": alt_typename,
-            "pcd_xyz": pcd_xyz,
-            "pcd_rgb": pcd_rgb,
+            "pcd_xyz": pcd_xyz.tobytes(),
+            "pcd_rgb": pcd_rgb.tobytes(),
         }
         ctx.logger.info("writing output to database")
         [output] = self.output()
@@ -315,53 +320,57 @@ class LiftingCommitTask(luigi.Task):
         for i in range(len(extrinsics)):
             xyz = np.linalg.inv(extrinsics[i])[:3, 3]
             ego_xyz.append(xyz)
-        ego_frames = np.arange(len(ego_xyz), dtype=np.int32).tobytes()
-        ego_xyz = np.array(ego_xyz, dtype=np.float32).tobytes()
+        ego_frames = np.arange(len(ego_xyz), dtype=np.int32)
+        ego_xyz = np.array(ego_xyz, dtype=np.float32)
         bimages_rgb = list[bytes]()
         for image_rgb in alignment_result["images_rgb"]:
             _, bimage_rgb = cv2.imencode(".png", cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
             bimage_rgb = bimage_rgb.tobytes()
             bimages_rgb.append(bimage_rgb)
         ego_images = bimages_rgb
+        ctx.logger.info(f"ego_frames: {ego_frames.shape}, ego_xyz: {ego_xyz.shape}, ego_images: {len(ego_images)}")
 
         alt_frames, alt_xyz, alt_labels = [], [], []
         tracking = np.load(tracking_path, allow_pickle=True)
         for i, results in enumerate(tracking["all_results"]):
             xyz, labels = results["centers"], results["labels"]
-            alt_frames.append(i)
-            alt_xyz.append(xyz)
-            alt_labels.append(labels)
-        alt_frames = np.array(alt_frames, dtype=np.int32).tobytes()
-        alt_xyz = np.concat(alt_xyz, axis=0, dtype=np.float32).tobytes()
-        alt_labels = np.concat(alt_labels, axis=0, dtype=np.dtypes.StringDType())
+            alt_frames.extend([i] * len(xyz))
+            alt_xyz.extend(xyz)
+            alt_labels.extend(labels)
+        alt_frames = np.array(alt_frames, dtype=np.int32)
+        alt_xyz = np.array(alt_xyz, dtype=np.float32)
+        alt_labels = np.array(alt_labels, dtype=np.dtypes.StringDType())
         alt_typename, alt_typemap = np.unique(alt_labels, return_inverse=True)
-        alt_typemap = alt_typemap.astype(np.uint8).tobytes()
+        alt_typemap = alt_typemap.astype(np.uint8)
         alt_typename = alt_typename.tolist()
+        ctx.logger.info(f"alt_frames: {alt_frames.shape}, alt_xyz: {alt_xyz.shape}, alt_typemap: {alt_typemap.shape}, alt_typename: {len(alt_typename)}")
 
         pcd = o3d.io.read_point_cloud(surface_path)
-        pcd_xyz = np.array(pcd.points, dtype=np.float32).tobytes()
+        pcd_xyz = np.array(pcd.points, dtype=np.float32)
         pcd_rgb = np.array(pcd.colors, dtype=np.float32)
-        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8).tobytes()
+        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
+        ctx.logger.info(f"pcd_xyz: {pcd_xyz.shape}, pcd_rgb: {pcd_rgb.shape}")
 
         lifting = np.load(lifting_path)
         feats = lifting["feats"]  # (N, M) where N is the number of points and M is the number of features
         feats = np.argmax(feats, axis=1)  # (N,) where each value is the index of the max feature
         feats[np.max(feats) == 0.0] = len(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES) - 1  # set all zero features to `unknown`
-        pcd_typemap = feats.astype(np.uint8).tobytes()
+        pcd_typemap = feats.astype(np.uint8)
         pcd_typename = utils.segmentation.CITYSCAPE_PLUS_CATEGORIES
+        ctx.logger.info(f"pcd_typemap: {pcd_typemap.shape}, pcd_typename: {len(pcd_typename)}")
 
         data = {
             "param": self.param_kwargs,
-            "ego_frames": ego_frames,
-            "ego_xyz": ego_xyz,
+            "ego_frames": ego_frames.tobytes(),
+            "ego_xyz": ego_xyz.tobytes(),
             "ego_images": ego_images,
-            "alt_frames": alt_frames,
-            "alt_xyz": alt_xyz,
-            "alt_typemap": alt_typemap,
+            "alt_frames": alt_frames.tobytes(),
+            "alt_xyz": alt_xyz.tobytes(),
+            "alt_typemap": alt_typemap.tobytes(),
             "alt_typename": alt_typename,
-            "pcd_xyz": pcd_xyz,
-            "pcd_rgb": pcd_rgb,
-            "pcd_typemap": pcd_typemap,
+            "pcd_xyz": pcd_xyz.tobytes(),
+            "pcd_rgb": pcd_rgb.tobytes(),
+            "pcd_typemap": pcd_typemap.tobytes(),
             "pcd_typename": pcd_typename,
         }
         ctx.logger.info("writing output to database")
