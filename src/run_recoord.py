@@ -6,6 +6,7 @@ os.environ["HF_HOME"] = ".cache/huggingface"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 import luigi
+import msgpack
 import yaml
 
 import context
@@ -13,43 +14,32 @@ import tasks.commit
 
 
 class DispatchTask(luigi.WrapperTask):
-    input_dir: luigi.StrParameter = luigi.StrParameter()
-    fps: luigi.IntParameter = luigi.IntParameter()
-    width: luigi.IntParameter = luigi.IntParameter()
-    height: luigi.IntParameter = luigi.IntParameter()
-    max_keypoints: luigi.IntParameter = luigi.IntParameter()
-    depth_confidence: luigi.FloatParameter = luigi.FloatParameter()
-    width_confidence: luigi.FloatParameter = luigi.FloatParameter()
-    init_frame_width: luigi.IntParameter = luigi.IntParameter()
-    init_frame_height: luigi.IntParameter = luigi.IntParameter()
-    init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
     highres_width: luigi.IntParameter = luigi.IntParameter()
     highres_height: luigi.IntParameter = luigi.IntParameter()
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
-    kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self) -> list[luigi.Task]:
+        ctx = context.Context()
+
         all_tasks = []
-        for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.commit.LiftingCommitTask(
-                input_path=input_path,
-                fps=self.fps,
-                width=self.width,
-                height=self.height,
-                max_keypoints=self.max_keypoints,
-                depth_confidence=self.depth_confidence,
-                width_confidence=self.width_confidence,
-                init_frame_width=self.init_frame_width,
-                init_frame_height=self.init_frame_height,
-                init_focal_length=self.init_focal_length,
+        for reply_path in glob.glob(os.path.join(ctx.database_dir, "TaggingCommitTask*.commit.msgpack")):
+            commit_path = reply_path.replace(".commit.msgpack", ".msgpack")
+            commit_data = msgpack.unpack(commit_path)
+            reply_data = msgpack.unpack(reply_path)
+
+            if reply_data["tag"] == 0:
+                ctx.logger.info(f"continue {reply_path} for quality tag check")
+                continue
+
+            task = tasks.commit.RecoordCommitTask(
+                *commit_data["params"],
                 highres_width=self.highres_width,
                 highres_height=self.highres_height,
                 ransac_threshold=self.ransac_threshold,
                 max_depth=self.max_depth,
                 voxel_downsample=self.voxel_downsample,
-                kernel_radius=self.kernel_radius,
             )
             all_tasks.append(task)
         return all_tasks
