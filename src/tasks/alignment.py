@@ -3,6 +3,7 @@ import shutil
 import tempfile
 
 import luigi
+import msgpack
 import numpy as np
 import open3d as o3d
 import pycolmap
@@ -129,6 +130,133 @@ class SurfaceTask(luigi.Task):
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [m]
 
     def requires(self) -> list[luigi.Task]:
+        alignment = AlignmentTask(
+            input_path=self.input_path,
+            fps=self.fps,
+            width=self.width,
+            height=self.height,
+            max_keypoints=self.max_keypoints,
+            width_confidence=self.width_confidence,
+            depth_confidence=self.depth_confidence,
+            init_frame_width=self.init_frame_width,
+            init_frame_height=self.init_frame_height,
+            init_focal_length=self.init_focal_length,
+        )
+        stereo_fusion_guide = tasks.multiview_stereo.StereoFusionTask(
+            input_path=self.input_path,
+            fps=self.fps,
+            width=self.width,
+            height=self.height,
+            max_keypoints=self.max_keypoints,
+            width_confidence=self.width_confidence,
+            depth_confidence=self.depth_confidence,
+            init_frame_width=self.init_frame_width,
+            init_frame_height=self.init_frame_height,
+            init_focal_length=self.init_focal_length,
+            highres_width=self.highres_width,
+            highres_height=self.highres_height,
+            mask_categories=tuple(utils.object_masking.PLANAR_CATEGORIES),
+        )
+        stereo_fusion = tasks.multiview_stereo.StereoFusionTask(
+            input_path=self.input_path,
+            fps=self.fps,
+            width=self.width,
+            height=self.height,
+            max_keypoints=self.max_keypoints,
+            width_confidence=self.width_confidence,
+            depth_confidence=self.depth_confidence,
+            init_frame_width=self.init_frame_width,
+            init_frame_height=self.init_frame_height,
+            init_focal_length=self.init_focal_length,
+            highres_width=self.highres_width,
+            highres_height=self.highres_height,
+            mask_categories=tuple(utils.object_masking.STATIC_CATEGORIES),
+        )
+        return [alignment, stereo_fusion_guide, stereo_fusion]
+
+    def output(self) -> list[luigi.Target]:
+        ctx = context.Context()
+        return [utils.task.FsTarget(ctx.database_dir, self)]
+
+    def run(self) -> None:
+        ctx = context.Context()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            [[alignment], [stereo_fusion_guide], [stereo_fusion]] = self.input()
+            alignment_path = os.path.join(alignment.read(), "alignment.npz")
+            fused_guide_path = os.path.join(stereo_fusion_guide.read(), "fused.ply")
+            fused_path = os.path.join(stereo_fusion.read(), "fused.ply")
+
+            # extract estimated model extrinsics
+            alignment_result = np.load(alignment_path)
+            b2a_mat = alignment_result["b2a_mat"]
+            intrinsics = alignment_result["intrinsics"]
+            extrinsics = alignment_result["extrinsics"]
+            images_rgb = alignment_result["images_rgb"]
+            masks_bool = alignment_result["masks_bool"]
+
+            # detect thin plate spline
+            pcd_guide = o3d.io.read_point_cloud(fused_guide_path)
+            pcd_guide.transform(b2a_mat)
+            # thin plate spline fitting using RANSAC
+            xyz = np.asarray(pcd_guide.points)
+            model, inliers = utils.alignment.fit_to_tps(xyz, self.ransac_threshold)
+            ctx.logger.info(f"ransac inlier ratio: {np.sum(inliers) / len(inliers)}")
+
+            # transform reference model
+            pcd_ref = o3d.io.read_point_cloud(fused_path)
+            pcd_ref.transform(b2a_mat)
+
+            # project points to thin-plate-spline
+            images_rgb = images_rgb.astype(np.float64) / 255.0
+            points, colors = utils.alignment.project_points_to_tps(
+                intrinsics,
+                extrinsics,
+                images_rgb,
+                masks_bool,
+                model,
+                max_depth=self.max_depth,
+            )
+            pcd_surface = o3d.geometry.PointCloud()
+            pcd_surface.points = o3d.utility.Vector3dVector(points)
+            pcd_surface.colors = o3d.utility.Vector3dVector(colors)
+            if self.voxel_downsample > 0.0:
+                pcd_surface = pcd_surface.voxel_down_sample(self.voxel_downsample)
+
+            # write points as PLY format
+            object_path = os.path.join(temp_dir, "object.ply")
+            pcd = pcd_surface + pcd_ref
+            o3d.io.write_point_cloud(object_path, pcd, write_ascii=False, compressed=True)
+
+            # write alignment as npz format
+            alignment_path = os.path.join(temp_dir, "alignment.npz")
+            np.savez_compressed(alignment_path, b2a_mat=b2a_mat, extrinsics=extrinsics, intrinsics=intrinsics, images_rgb=images_rgb, masks_bool=masks_bool)
+
+            ctx.logger.info("writing output to database")
+            [output] = self.output()
+            shutil.move(object_path, output.open())
+            shutil.move(alignment_path, output.open())
+
+
+class RefineSurfaceTask(luigi.Task):
+    input_path: luigi.StrParameter = luigi.StrParameter()
+    fps: luigi.IntParameter = luigi.IntParameter()
+    width: luigi.IntParameter = luigi.IntParameter()
+    height: luigi.IntParameter = luigi.IntParameter()
+    max_keypoints: luigi.IntParameter = luigi.IntParameter()
+    depth_confidence: luigi.FloatParameter = luigi.FloatParameter()
+    width_confidence: luigi.FloatParameter = luigi.FloatParameter()
+    init_frame_width: luigi.IntParameter = luigi.IntParameter()
+    init_frame_height: luigi.IntParameter = luigi.IntParameter()
+    init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
+    highres_width: luigi.IntParameter = luigi.IntParameter()
+    highres_height: luigi.IntParameter = luigi.IntParameter()
+
+    ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()  # [0.0, 1.0]
+    max_depth: luigi.FloatParameter = luigi.FloatParameter()  # [m]
+    voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [m]
+    recoord_commit_data: luigi.StrParameter = luigi.StrParameter()
+
+    def requires(self) -> list[luigi.Task]:
         tracking = tasks.object_masking.TrackingTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -208,6 +336,13 @@ class SurfaceTask(luigi.Task):
             images_rgb = alignment_result["images_rgb"]
             masks_bool = alignment_result["masks_bool"]
 
+            # read recoord commit data for fitting scale and origin
+            data = msgpack.unpack(self.recoord_commit_data)
+            commit_scale_mat, commit_position_mat = np.eye(4), np.eye(4)
+            commit_scale_mat = commit_scale_mat * np.array(data["scale"], dtype=np.float32)
+            commit_position_mat[:3, 3] = np.array(data["position"], dtype=np.float32)
+            b2a_mat = commit_position_mat @ commit_scale_mat @ b2a_mat
+
             # process tracking
             width, height = images_rgb.shape[2], images_rgb.shape[1]
             tracking_pickle = np.load(tracking_path, allow_pickle=True)
@@ -275,11 +410,16 @@ class SurfaceTask(luigi.Task):
             pcd = pcd_surface + pcd_ref
             o3d.io.write_point_cloud(object_path, pcd, write_ascii=False, compressed=True)
 
-            # write points as npz format
+            # write tracking as npz format
             tracking_path = os.path.join(temp_dir, "tracking.npz")
             np.savez_compressed(tracking_path, all_results=all_results)
+
+            # write alignment as npz format
+            alignment_path = os.path.join(temp_dir, "alignment.npz")
+            np.savez_compressed(alignment_path, b2a_mat=b2a_mat, extrinsics=extrinsics, intrinsics=intrinsics, images_rgb=images_rgb, masks_bool=masks_bool)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
             shutil.move(object_path, output.open())
             shutil.move(tracking_path, output.open())
+            shutil.move(alignment_path, output.open())

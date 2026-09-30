@@ -23,16 +23,11 @@ class DispatchTask(luigi.WrapperTask):
     init_frame_width: luigi.IntParameter = luigi.IntParameter()
     init_frame_height: luigi.IntParameter = luigi.IntParameter()
     init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
-    highres_width: luigi.IntParameter = luigi.IntParameter()
-    highres_height: luigi.IntParameter = luigi.IntParameter()
-    ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
-    max_depth: luigi.FloatParameter = luigi.FloatParameter()
-    voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self) -> list[luigi.Task]:
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.commit.SurfaceCommitTask(
+            task = tasks.commit.TaggingCommitTask(
                 input_path=input_path,
                 fps=self.fps,
                 width=self.width,
@@ -43,11 +38,6 @@ class DispatchTask(luigi.WrapperTask):
                 init_frame_width=self.init_frame_width,
                 init_frame_height=self.init_frame_height,
                 init_focal_length=self.init_focal_length,
-                highres_width=self.highres_width,
-                highres_height=self.highres_height,
-                ransac_threshold=self.ransac_threshold,
-                max_depth=self.max_depth,
-                voxel_downsample=self.voxel_downsample,
             )
             all_tasks.append(task)
         return all_tasks
@@ -69,6 +59,6 @@ if __name__ == "__main__":
         names = DispatchTask.get_param_names()
         params = {name: value for name, value in config["dispatch"].items() if name in names}
         task = DispatchTask(**params)
-        luigi.build([task], local_scheduler=True, workers=1)
+        luigi.build([task], local_scheduler=True, detailed_summary=True)
     except Exception as e:
         ctx.logger.error(f"Failed to complete task.\n```{e}```")

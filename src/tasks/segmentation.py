@@ -84,6 +84,7 @@ class LiftingTask(luigi.Task):
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
+    recoord_commit_path: luigi.StrParameter = luigi.StrParameter()
 
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()  # [0, 1]
 
@@ -113,7 +114,7 @@ class LiftingTask(luigi.Task):
             init_frame_height=self.init_frame_height,
             init_focal_length=self.init_focal_length,
         )
-        alignment = tasks.alignment.AlignmentTask(
+        refine_surface = tasks.alignment.RefineSurfaceTask(
             input_path=self.input_path,
             fps=self.fps,
             width=self.width,
@@ -124,9 +125,14 @@ class LiftingTask(luigi.Task):
             init_frame_width=self.init_frame_width,
             init_frame_height=self.init_frame_height,
             init_focal_length=self.init_focal_length,
+            highres_width=self.highres_width,
+            highres_height=self.highres_height,
+            ransac_threshold=self.ransac_threshold,
+            max_depth=self.max_depth,
+            voxel_downsample=self.voxel_downsample,
+            recoord_commit_path=self.recoord_commit_path,
         )
-        surface = tasks.alignment.SurfaceTask(input_path=self.input_path, fps=self.fps, width=self.width, height=self.height, max_keypoints=self.max_keypoints, width_confidence=self.width_confidence, depth_confidence=self.depth_confidence, init_frame_width=self.init_frame_width, init_frame_height=self.init_frame_height, init_focal_length=self.init_focal_length, highres_width=self.highres_width, highres_height=self.highres_height, ransac_threshold=self.ransac_threshold, max_depth=self.max_depth, voxel_downsample=self.voxel_downsample)
-        return [segmentation, object_masking, reconstruction, alignment, surface]
+        return [segmentation, object_masking, reconstruction, refine_surface]
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
@@ -135,12 +141,12 @@ class LiftingTask(luigi.Task):
     def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
-            [[segmentation], [object_masking], [reconstruction], [alignment], [surface]] = self.input()
+            [[segmentation], [object_masking], [reconstruction], [refine_surface]] = self.input()
             segmentation_dir = os.path.join(segmentation.read(), "segmentation")
             mask_dir = os.path.join(object_masking.read(), "masks")
             model_dir = os.path.join(reconstruction.read(), "model")
-            alignment_path = os.path.join(alignment.read(), "alignment.npz")
-            surface_path = os.path.join(surface.read(), "object.ply")
+            alignment_path = os.path.join(refine_surface.read(), "alignment.npz")
+            surface_path = os.path.join(refine_surface.read(), "object.ply")
 
             # undistort images using COLMAP
             lowres_mask_dir = os.path.join(temp_dir, "masks")

@@ -9,18 +9,15 @@ import pycolmap
 
 import context
 import tasks.alignment
-import tasks.multiview_stereo
-import tasks.object_masking
 import tasks.reconstruction
 import tasks.segmentation
 import tasks.video_sampling
 import utils.alignment
-import utils.object_masking
 import utils.segmentation
 import utils.task
 
 
-class ReconstructCommitTask(luigi.Task):
+class TaggingCommitTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -75,10 +72,11 @@ class ReconstructCommitTask(luigi.Task):
         # read intrinsics and undistort images
         images_rgb, _ = utils.alignment.undistort_image_dir(model_dir, image_dir, rgb=True)
 
-        # align
+        # align to initial camera pose
         b2a_mat = extrinsics_base[0]
-        extrinsics = extrinsics_base @ np.linalg.inv(b2a_mat)
+        extrinsics = np.linalg.inv(b2a_mat) @ extrinsics_base
 
+        # read ego trajectory and images
         ego_frames, ego_xyz = [], []
         for i in range(len(extrinsics)):
             xyz = np.linalg.inv(extrinsics[i])[:3, 3]
@@ -93,6 +91,7 @@ class ReconstructCommitTask(luigi.Task):
         ego_images = bimages_rgb
         ctx.logger.info(f"ego_frames: {ego_frames.shape}, ego_xyz: {ego_xyz.shape}, ego_images: {len(ego_images)}")
 
+        # read sparse point cloud
         model = pycolmap.Reconstruction(model_dir)
         pcd_xyz, pcd_rgb = [], []
         for i in model.points3D:
@@ -117,7 +116,7 @@ class ReconstructCommitTask(luigi.Task):
             msgpack.pack(data, f, use_bin_type=True)
 
 
-class SurfaceCommitTask(luigi.Task):
+class RecoordCommitTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -175,9 +174,9 @@ class SurfaceCommitTask(luigi.Task):
 
         [[surface], [alignment]] = self.input()
         surface_path = os.path.join(surface.read(), "object.ply")
-        tracking_path = os.path.join(surface.read(), "tracking.npz")
         alignment_path = os.path.join(alignment.read(), "alignment.npz")
 
+        # read ego trajectory and images
         ego_frames, ego_xyz = [], []
         alignment_result = np.load(alignment_path)
         extrinsics = alignment_result["extrinsics"]
@@ -194,21 +193,7 @@ class SurfaceCommitTask(luigi.Task):
         ego_images = bimages_rgb
         ctx.logger.info(f"ego_frames: {ego_frames.shape}, ego_xyz: {ego_xyz.shape}, ego_images: {len(ego_images)}")
 
-        alt_frames, alt_xyz, alt_labels = [], [], []
-        tracking = np.load(tracking_path, allow_pickle=True)
-        for i, results in enumerate(tracking["all_results"]):
-            xyz, labels = results["centers"], results["labels"]
-            alt_frames.extend([i] * len(xyz))
-            alt_xyz.extend(xyz)
-            alt_labels.extend(labels)
-        alt_frames = np.array(alt_frames, dtype=np.int32)
-        alt_xyz = np.array(alt_xyz, dtype=np.float32)
-        alt_labels = np.array(alt_labels, dtype=np.dtypes.StringDType())
-        alt_typename, alt_typemap = np.unique(alt_labels, return_inverse=True)
-        alt_typemap = alt_typemap.astype(np.uint8)
-        alt_typename = alt_typename.tolist()
-        ctx.logger.info(f"alt_frames: {alt_frames.shape}, alt_xyz: {alt_xyz.shape}, alt_typemap: {alt_typemap.shape}, alt_typename: {len(alt_typename)}")
-
+        # read dense point cloud
         pcd = o3d.io.read_point_cloud(surface_path)
         pcd_xyz = np.array(pcd.points, dtype=np.float32)
         pcd_rgb = np.array(pcd.colors, dtype=np.float32)
@@ -220,10 +205,6 @@ class SurfaceCommitTask(luigi.Task):
             "ego_frames": ego_frames.tobytes(),
             "ego_xyz": ego_xyz.tobytes(),
             "ego_images": ego_images,
-            "alt_frames": alt_frames.tobytes(),
-            "alt_xyz": alt_xyz.tobytes(),
-            "alt_typemap": alt_typemap.tobytes(),
-            "alt_typename": alt_typename,
             "pcd_xyz": pcd_xyz.tobytes(),
             "pcd_rgb": pcd_rgb.tobytes(),
         }
@@ -233,7 +214,7 @@ class SurfaceCommitTask(luigi.Task):
             msgpack.pack(data, f, use_bin_type=True)
 
 
-class LiftingCommitTask(luigi.Task):
+class PostCommitTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -250,9 +231,10 @@ class LiftingCommitTask(luigi.Task):
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
+    recoord_commit_path: luigi.StrParameter = luigi.StrParameter()
 
     def requires(self) -> list[luigi.Task]:
-        surface = tasks.alignment.SurfaceTask(
+        refine_surface = tasks.alignment.RefineSurfaceTask(
             input_path=self.input_path,
             fps=self.fps,
             width=self.width,
@@ -268,18 +250,7 @@ class LiftingCommitTask(luigi.Task):
             ransac_threshold=self.ransac_threshold,
             max_depth=self.max_depth,
             voxel_downsample=self.voxel_downsample,
-        )
-        alignment = tasks.alignment.AlignmentTask(
-            input_path=self.input_path,
-            fps=self.fps,
-            width=self.width,
-            height=self.height,
-            max_keypoints=self.max_keypoints,
-            width_confidence=self.width_confidence,
-            depth_confidence=self.depth_confidence,
-            init_frame_width=self.init_frame_width,
-            init_frame_height=self.init_frame_height,
-            init_focal_length=self.init_focal_length,
+            recoord_commit_path=self.recoord_commit_path,
         )
         lifting = tasks.segmentation.LiftingTask(
             input_path=self.input_path,
@@ -299,7 +270,7 @@ class LiftingCommitTask(luigi.Task):
             voxel_downsample=self.voxel_downsample,
             kernel_radius=self.kernel_radius,
         )
-        return [surface, alignment, lifting]
+        return [refine_surface, lifting]
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
@@ -308,12 +279,13 @@ class LiftingCommitTask(luigi.Task):
     def run(self) -> None:
         ctx = context.Context()
 
-        [[surface], [alignment], [lifting]] = self.input()
-        surface_path = os.path.join(surface.read(), "object.ply")
-        tracking_path = os.path.join(surface.read(), "tracking.npz")
-        alignment_path = os.path.join(alignment.read(), "alignment.npz")
+        [[refine_surface], [lifting]] = self.input()
+        surface_path = os.path.join(refine_surface.read(), "object.ply")
+        tracking_path = os.path.join(refine_surface.read(), "tracking.npz")
+        alignment_path = os.path.join(refine_surface.read(), "alignment.npz")
         lifting_path = os.path.join(lifting.read(), "xyz_feats.npz")
 
+        # read ego trajectory and images
         ego_frames, ego_xyz = [], []
         alignment_result = np.load(alignment_path)
         extrinsics = alignment_result["extrinsics"]
@@ -330,6 +302,7 @@ class LiftingCommitTask(luigi.Task):
         ego_images = bimages_rgb
         ctx.logger.info(f"ego_frames: {ego_frames.shape}, ego_xyz: {ego_xyz.shape}, ego_images: {len(ego_images)}")
 
+        # read tracking trajectory
         alt_frames, alt_xyz, alt_labels = [], [], []
         tracking = np.load(tracking_path, allow_pickle=True)
         for i, results in enumerate(tracking["all_results"]):
@@ -345,12 +318,14 @@ class LiftingCommitTask(luigi.Task):
         alt_typename = alt_typename.tolist()
         ctx.logger.info(f"alt_frames: {alt_frames.shape}, alt_xyz: {alt_xyz.shape}, alt_typemap: {alt_typemap.shape}, alt_typename: {len(alt_typename)}")
 
+        # read dense point cloud
         pcd = o3d.io.read_point_cloud(surface_path)
         pcd_xyz = np.array(pcd.points, dtype=np.float32)
         pcd_rgb = np.array(pcd.colors, dtype=np.float32)
         pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
         ctx.logger.info(f"pcd_xyz: {pcd_xyz.shape}, pcd_rgb: {pcd_rgb.shape}")
 
+        # read dense point cloud semantic segmentation
         lifting = np.load(lifting_path)
         feats = lifting["feats"]  # (N, M) where N is the number of points and M is the number of features
         feats = np.argmax(feats, axis=1)  # (N,) where each value is the index of the max feature

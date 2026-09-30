@@ -1,4 +1,4 @@
-.PHONY: build check fix run_download run_reconstruct run_surface run_lifting
+.PHONY: build check fix run_download run_tagging run_recoord run_post
 
 build:
 	@uv sync
@@ -15,11 +15,11 @@ fix:
 run_download:
 	@uv run src/run_download.py
 
-run_reconstruct:
-	@uv run src/run_reconstruct.py
+run_tagging:
+	@uv run src/run_tagging.py
 
-run_surface:
-	@uv run src/run_surface.py
+run_recoord:
+	@uv run src/run_recoord.py
 
-run_lifting:
-	@uv run src/run_lifting.py
+run_post:
+	@uv run src/run_post.py
