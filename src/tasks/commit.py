@@ -74,7 +74,7 @@ class TaggingCommitTask(luigi.Task):
 
         # align to initial camera pose
         b2a_mat = extrinsics_base[0]
-        extrinsics = np.linalg.inv(b2a_mat) @ extrinsics_base
+        extrinsics = extrinsics_base @ np.linalg.inv(b2a_mat)
 
         # read ego trajectory and images
         ego_frames, ego_xyz = [], []
@@ -269,6 +269,7 @@ class PostCommitTask(luigi.Task):
             max_depth=self.max_depth,
             voxel_downsample=self.voxel_downsample,
             kernel_radius=self.kernel_radius,
+            recoord_commit_path=self.recoord_commit_path,
         )
         return [refine_surface, lifting]
 

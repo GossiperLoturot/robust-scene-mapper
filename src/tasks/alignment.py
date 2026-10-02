@@ -104,7 +104,14 @@ class AlignmentTask(luigi.Task):
             # write alignment data as NPZ format
             alignment_path = os.path.join(temp_dir, "alignment.npz")
             extrinsics = extrinsics_base @ np.linalg.inv(b2a_mat)
-            np.savez_compressed(alignment_path, b2a_mat=b2a_mat, extrinsics=extrinsics, intrinsics=intrinsics, images_rgb=images_rgb, masks_bool=masks_bool)
+            np.savez_compressed(
+                alignment_path,
+                b2a_mat=b2a_mat,
+                extrinsics=extrinsics,
+                intrinsics=intrinsics,
+                images_rgb=images_rgb,
+                masks_bool=masks_bool
+            )
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
@@ -254,9 +261,21 @@ class RefineSurfaceTask(luigi.Task):
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()  # [0.0, 1.0]
     max_depth: luigi.FloatParameter = luigi.FloatParameter()  # [m]
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [m]
-    recoord_commit_data: luigi.StrParameter = luigi.StrParameter()
+    recoord_commit_path: luigi.StrParameter = luigi.StrParameter()
 
     def requires(self) -> list[luigi.Task]:
+        reconstruction = tasks.reconstruction.ReconstructionTask(
+            input_path=self.input_path,
+            fps=self.fps,
+            width=self.width,
+            height=self.height,
+            max_keypoints=self.max_keypoints,
+            width_confidence=self.width_confidence,
+            depth_confidence=self.depth_confidence,
+            init_frame_width=self.init_frame_width,
+            init_frame_height=self.init_frame_height,
+            init_focal_length=self.init_focal_length,
+        )
         tracking = tasks.object_masking.TrackingTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -313,7 +332,7 @@ class RefineSurfaceTask(luigi.Task):
             highres_height=self.highres_height,
             mask_categories=tuple(utils.object_masking.STATIC_CATEGORIES),
         )
-        return [tracking, alignment, stereo_fusion_guide, stereo_fusion]
+        return [reconstruction, tracking, alignment, stereo_fusion_guide, stereo_fusion]
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
@@ -322,11 +341,20 @@ class RefineSurfaceTask(luigi.Task):
     def run(self) -> None:
         ctx = context.Context()
         with tempfile.TemporaryDirectory() as temp_dir:
-            [[tracking], [alignment], [stereo_fusion_guide], [stereo_fusion]] = self.input()
+            [[reconstruction], [tracking], [alignment], [stereo_fusion_guide], [stereo_fusion]] = self.input()
+            model_dir = os.path.join(reconstruction.read(), "model")
             tracking_path = os.path.join(tracking.read(), "tracking.npz")
             alignment_path = os.path.join(alignment.read(), "alignment.npz")
             fused_guide_path = os.path.join(stereo_fusion_guide.read(), "fused.ply")
             fused_path = os.path.join(stereo_fusion.read(), "fused.ply")
+
+            # extract reference model extrinsics
+            extrinsics_base = []
+            model = pycolmap.Reconstruction(model_dir)
+            for image_id in sorted(model.images):
+                image = model.image(image_id)
+                extrinsics_base.append(np.concat([image.cam_from_world().matrix(), [[0, 0, 0, 1]]]))
+            extrinsics_base = np.array(extrinsics_base)
 
             # extract estimated model extrinsics
             alignment_result = np.load(alignment_path)
@@ -337,11 +365,15 @@ class RefineSurfaceTask(luigi.Task):
             masks_bool = alignment_result["masks_bool"]
 
             # read recoord commit data for fitting scale and origin
-            data = msgpack.unpack(self.recoord_commit_data)
+            with open(self.recoord_commit_path, "rb") as f:
+                commit_data = msgpack.unpack(f)
             commit_scale_mat, commit_position_mat = np.eye(4), np.eye(4)
-            commit_scale_mat = commit_scale_mat * np.array(data["scale"], dtype=np.float32)
-            commit_position_mat[:3, 3] = np.array(data["position"], dtype=np.float32)
+            commit_scale_mat[:3, :3] *= np.array(commit_data["scale"], dtype=np.float32)
+            commit_position_mat[:3, 3] = np.array(commit_data["position"], dtype=np.float32)
             b2a_mat = commit_position_mat @ commit_scale_mat @ b2a_mat
+
+            # transform extrinsics to align with the recoord commit
+            extrinsics = extrinsics_base @ np.linalg.inv(b2a_mat)
 
             # process tracking
             width, height = images_rgb.shape[2], images_rgb.shape[1]
@@ -405,9 +437,8 @@ class RefineSurfaceTask(luigi.Task):
             for centers, labels in zip(all_centers, all_labels, strict=True):
                 all_results.append({"centers": centers, "labels": labels})
 
-            # write points as PLY format
             object_path = os.path.join(temp_dir, "object.ply")
-            pcd = pcd_surface + pcd_ref
+            pcd = pcd_ref + pcd_surface
             o3d.io.write_point_cloud(object_path, pcd, write_ascii=False, compressed=True)
 
             # write tracking as npz format
@@ -415,11 +446,18 @@ class RefineSurfaceTask(luigi.Task):
             np.savez_compressed(tracking_path, all_results=all_results)
 
             # write alignment as npz format
-            alignment_path = os.path.join(temp_dir, "alignment.npz")
-            np.savez_compressed(alignment_path, b2a_mat=b2a_mat, extrinsics=extrinsics, intrinsics=intrinsics, images_rgb=images_rgb, masks_bool=masks_bool)
+            new_alignment_path = os.path.join(temp_dir, "alignment.npz")
+            np.savez_compressed(
+                new_alignment_path,
+                b2a_mat=b2a_mat,
+                extrinsics=extrinsics,
+                intrinsics=alignment_result["intrinsics"],
+                images_rgb=alignment_result["images_rgb"],
+                masks_bool=alignment_result["masks_bool"]
+            )
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
             shutil.move(object_path, output.open())
             shutil.move(tracking_path, output.open())
-            shutil.move(alignment_path, output.open())
+            shutil.move(new_alignment_path, output.open())
