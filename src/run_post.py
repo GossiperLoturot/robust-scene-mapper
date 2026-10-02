@@ -22,9 +22,11 @@ class DispatchTask(luigi.WrapperTask):
         all_tasks = []
         for reply_path in glob.glob(os.path.join(ctx.database_dir, "RecoordCommitTask*.commit.msgpack")):
             commit_path = reply_path.replace(".commit.msgpack", ".msgpack")
-            commit_data = msgpack.unpack(commit_path)
+            with open(commit_path, "rb") as f:
+                commit_data = msgpack.unpack(f)
+
             task = tasks.commit.PostCommitTask(
-                *commit_data["params"],
+                **commit_data["param"],
                 kernel_radius=self.kernel_radius,
                 recoord_commit_path=reply_path,
             )

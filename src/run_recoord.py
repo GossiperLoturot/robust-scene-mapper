@@ -26,15 +26,17 @@ class DispatchTask(luigi.WrapperTask):
         all_tasks = []
         for reply_path in glob.glob(os.path.join(ctx.database_dir, "TaggingCommitTask*.commit.msgpack")):
             commit_path = reply_path.replace(".commit.msgpack", ".msgpack")
-            commit_data = msgpack.unpack(commit_path)
-            reply_data = msgpack.unpack(reply_path)
+            with open(commit_path, "rb") as f:
+                commit_data = msgpack.unpack(f)
+            with open(reply_path, "rb") as f:
+                reply_data = msgpack.unpack(f)
 
             if reply_data["tag"] == 0:
                 ctx.logger.info(f"continue {reply_path} for quality tag check")
                 continue
 
             task = tasks.commit.RecoordCommitTask(
-                *commit_data["params"],
+                **commit_data["param"],
                 highres_width=self.highres_width,
                 highres_height=self.highres_height,
                 ransac_threshold=self.ransac_threshold,

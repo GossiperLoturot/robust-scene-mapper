@@ -100,7 +100,7 @@ class LiftingTask(luigi.Task):
             fps=self.fps,
             width=self.highres_width,
             height=self.highres_height,
-            mask_categories=utils.object_masking.STATIC_CATEGORIES,
+            mask_categories=tuple(utils.object_masking.STATIC_CATEGORIES),
         )
         reconstruction = tasks.reconstruction.ReconstructionTask(
             input_path=self.input_path,
