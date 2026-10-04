@@ -72,17 +72,17 @@ class FsArchiveTarget(luigi.Target):
             yield archive
 
 
-class MsgpackTarget(luigi.Target):
+class FileTarget(luigi.Target):
     database_dir: str
     basename: str
 
-    def __init__(self, database_dir: str, task: luigi.Task) -> None:
+    def __init__(self, database_dir: str, task: luigi.Task, ext: str) -> None:
         self.database_dir = database_dir
 
         task_name = task.__class__.__name__
         params_json = json.dumps(task.param_kwargs, sort_keys=True)
         hexdigest = hashlib.md5(params_json.encode()).hexdigest()
-        basename = f"{task_name}_{hexdigest}.msgpack"
+        basename = f"{task_name}_{hexdigest}.{ext}"
 
         self.database_dir = database_dir
         self.basename = basename
