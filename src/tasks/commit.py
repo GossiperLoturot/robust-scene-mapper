@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 import cv2
 import luigi
@@ -52,7 +53,7 @@ class TaggingCommitTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.MsgpackTarget(ctx.database_dir, self)]
+        return [utils.task.FileTarget(ctx.database_dir, self, "msgpack")]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -167,7 +168,7 @@ class RecoordCommitTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.MsgpackTarget(ctx.database_dir, self)]
+        return [utils.task.FileTarget(ctx.database_dir, self, "msgpack")]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -214,7 +215,7 @@ class RecoordCommitTask(luigi.Task):
             msgpack.pack(data, f, use_bin_type=True)
 
 
-class PostCommitTask(luigi.Task):
+class AnnotateCommitTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -275,81 +276,134 @@ class PostCommitTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.MsgpackTarget(ctx.database_dir, self)]
+        tracking = utils.task.FileTarget(ctx.database_dir, self, "msgpack")
+        geometry = utils.task.FileTarget(ctx.database_dir, self, "ply")
+        return [tracking, geometry]
 
     def run(self) -> None:
         ctx = context.Context()
 
-        [[refine_surface], [lifting]] = self.input()
-        surface_path = os.path.join(refine_surface.read(), "object.ply")
-        tracking_path = os.path.join(refine_surface.read(), "tracking.npz")
-        alignment_path = os.path.join(refine_surface.read(), "alignment.npz")
-        lifting_path = os.path.join(lifting.read(), "xyz_feats.npz")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            [[refine_surface], [lifting]] = self.input()
+            surface_path = os.path.join(refine_surface.read(), "object.ply")
+            tracking_path = os.path.join(refine_surface.read(), "tracking.npz")
+            alignment_path = os.path.join(refine_surface.read(), "alignment.npz")
+            lifting_path = os.path.join(lifting.read(), "xyz_feats.npz")
 
-        # read ego trajectory and images
-        ego_frames, ego_xyz = [], []
-        alignment_result = np.load(alignment_path)
-        extrinsics = alignment_result["extrinsics"]
-        for i in range(len(extrinsics)):
-            xyz = np.linalg.inv(extrinsics[i])[:3, 3]
-            ego_xyz.append(xyz)
-        ego_frames = np.arange(len(ego_xyz), dtype=np.int32)
-        ego_xyz = np.array(ego_xyz, dtype=np.float32)
-        bimages_rgb = list[bytes]()
-        for image_rgb in alignment_result["images_rgb"]:
-            _, bimage_rgb = cv2.imencode(".png", cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
-            bimage_rgb = bimage_rgb.tobytes()
-            bimages_rgb.append(bimage_rgb)
-        ego_images = bimages_rgb
-        ctx.logger.info(f"ego_frames: {ego_frames.shape}, ego_xyz: {ego_xyz.shape}, ego_images: {len(ego_images)}")
+            # read ego trajectory and images
+            ego_frames, ego_xyz = [], []
+            alignment_result = np.load(alignment_path)
+            extrinsics = alignment_result["extrinsics"]
+            for i in range(len(extrinsics)):
+                xyz = np.linalg.inv(extrinsics[i])[:3, 3]
+                ego_xyz.append(xyz)
+            ego_frames = np.arange(len(ego_xyz), dtype=np.int32)
+            ego_xyz = np.array(ego_xyz, dtype=np.float32)
+            bimages_rgb = list[bytes]()
+            for image_rgb in alignment_result["images_rgb"]:
+                _, bimage_rgb = cv2.imencode(".png", cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+                bimage_rgb = bimage_rgb.tobytes()
+                bimages_rgb.append(bimage_rgb)
+            ego_images = bimages_rgb
+            ctx.logger.info(f"ego_frames: {ego_frames.shape}, ego_xyz: {ego_xyz.shape}, ego_images: {len(ego_images)}")
 
-        # read tracking trajectory
-        alt_frames, alt_xyz, alt_labels = [], [], []
-        tracking = np.load(tracking_path, allow_pickle=True)
-        for i, results in enumerate(tracking["all_results"]):
-            xyz, labels = results["centers"], results["labels"]
-            alt_frames.extend([i] * len(xyz))
-            alt_xyz.extend(xyz)
-            alt_labels.extend(labels)
-        alt_frames = np.array(alt_frames, dtype=np.int32)
-        alt_xyz = np.array(alt_xyz, dtype=np.float32)
-        alt_labels = np.array(alt_labels, dtype=np.dtypes.StringDType())
-        alt_typename, alt_typemap = np.unique(alt_labels, return_inverse=True)
-        alt_typemap = alt_typemap.astype(np.uint8)
-        alt_typename = alt_typename.tolist()
-        ctx.logger.info(f"alt_frames: {alt_frames.shape}, alt_xyz: {alt_xyz.shape}, alt_typemap: {alt_typemap.shape}, alt_typename: {len(alt_typename)}")
+            # read tracking trajectory
+            alt_frames, alt_xyz, alt_labels = [], [], []
+            tracking = np.load(tracking_path, allow_pickle=True)
+            for i, results in enumerate(tracking["all_results"]):
+                xyz, labels = results["centers"], results["labels"]
+                alt_frames.extend([i] * len(xyz))
+                alt_xyz.extend(xyz)
+                alt_labels.extend(labels)
+            alt_frames = np.array(alt_frames, dtype=np.int32)
+            alt_xyz = np.array(alt_xyz, dtype=np.float32)
+            alt_labels = np.array(alt_labels, dtype=np.dtypes.StringDType())
+            alt_typename, alt_typemap = np.unique(alt_labels, return_inverse=True)
+            alt_typemap = alt_typemap.astype(np.uint8)
+            alt_typename = alt_typename.tolist()
+            ctx.logger.info(f"alt_frames: {alt_frames.shape}, alt_xyz: {alt_xyz.shape}, alt_typemap: {alt_typemap.shape}, alt_typename: {len(alt_typename)}")
 
-        # read dense point cloud
-        pcd = o3d.io.read_point_cloud(surface_path)
-        pcd_xyz = np.array(pcd.points, dtype=np.float32)
-        pcd_rgb = np.array(pcd.colors, dtype=np.float32)
-        pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
-        ctx.logger.info(f"pcd_xyz: {pcd_xyz.shape}, pcd_rgb: {pcd_rgb.shape}")
+            # read dense point cloud
+            pcd = o3d.io.read_point_cloud(surface_path)
+            pcd_xyz = np.array(pcd.points, dtype=np.float32)
+            pcd_rgb = np.array(pcd.colors, dtype=np.float32)
+            pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
+            ctx.logger.info(f"pcd_xyz: {pcd_xyz.shape}, pcd_rgb: {pcd_rgb.shape}")
 
-        # read dense point cloud semantic segmentation
-        lifting = np.load(lifting_path)
-        feats = lifting["feats"]  # (N, M) where N is the number of points and M is the number of features
-        feats = np.argmax(feats, axis=1)  # (N,) where each value is the index of the max feature
-        feats[np.max(feats) == 0.0] = len(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES) - 1  # set all zero features to `unknown`
-        pcd_typemap = feats.astype(np.uint8)
-        pcd_typename = utils.segmentation.CITYSCAPE_PLUS_CATEGORIES
-        ctx.logger.info(f"pcd_typemap: {pcd_typemap.shape}, pcd_typename: {len(pcd_typename)}")
+            # read dense point cloud semantic segmentation
+            lifting = np.load(lifting_path)
+            feats = lifting["feats"]  # (N, M) where N is the number of points and M is the number of features
+            feats = np.argmax(feats, axis=1)  # (N,) where each value is the index of the max feature
+            feats[np.max(feats) == 0.0] = len(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES) - 1  # set all zero features to `unknown`
+            pcd_typemap = feats.astype(np.uint8)
+            pcd_typename = utils.segmentation.CITYSCAPE_PLUS_CATEGORIES
+            ctx.logger.info(f"pcd_typemap: {pcd_typemap.shape}, pcd_typename: {len(pcd_typename)}")
 
-        data = {
-            "param": self.param_kwargs,
-            "ego_frames": ego_frames.tobytes(),
-            "ego_xyz": ego_xyz.tobytes(),
-            "ego_images": ego_images,
-            "alt_frames": alt_frames.tobytes(),
-            "alt_xyz": alt_xyz.tobytes(),
-            "alt_typemap": alt_typemap.tobytes(),
-            "alt_typename": alt_typename,
-            "pcd_xyz": pcd_xyz.tobytes(),
-            "pcd_rgb": pcd_rgb.tobytes(),
-            "pcd_typemap": pcd_typemap.tobytes(),
-            "pcd_typename": pcd_typename,
-        }
-        ctx.logger.info("writing output to database")
-        [output] = self.output()
-        with output.open() as f:
-            msgpack.pack(data, f, use_bin_type=True)
+            # semantic segmentation color as normals
+            hues = np.linspace(0, 180, len(utils.segmentation.CITYSCAPE_PLUS_CATEGORIES), endpoint=False, dtype=np.uint8)
+            palette = np.array([cv2.cvtColor(np.array([[[hue, 255, 255]]], dtype=np.uint8), cv2.COLOR_HSV2RGB)[0, 0] for hue in hues])
+            rgb = palette[feats]
+            pcd.normals = o3d.utility.Vector3dVector(rgb.astype(np.float64) / 255.0)
+
+            # output as msgpack file
+            data = {
+                "param": self.param_kwargs,
+                "ego_frames": ego_frames.tobytes(),
+                "ego_xyz": ego_xyz.tobytes(),
+                "ego_images": ego_images,
+                "alt_frames": alt_frames.tobytes(),
+                "alt_xyz": alt_xyz.tobytes(),
+                "alt_typemap": alt_typemap.tobytes(),
+                "alt_typename": alt_typename,
+                "pcd_xyz": pcd_xyz.tobytes(),
+                "pcd_rgb": pcd_rgb.tobytes(),
+                "pcd_typemap": pcd_typemap.tobytes(),
+                "pcd_typename": pcd_typename,
+            }
+
+            # output as PLY file
+            ply_path = os.path.join(temp_dir, "object.ply")
+            o3d.io.write_point_cloud(ply_path, pcd)
+
+            ctx.logger.info("writing output to database")
+            [tracking, geometry] = self.output()
+            with tracking.open() as f:
+                msgpack.pack(data, f, use_bin_type=True)
+            with geometry.open() as f, open(ply_path, "rb") as g:
+                f.write(g.read())
+
+
+class PackCommitTask(luigi.Task):
+    tracking_path: luigi.StrParameter = luigi.StrParameter()
+    geometry_path: luigi.StrParameter = luigi.StrParameter()
+    tracking_commit_path: luigi.StrParameter = luigi.StrParameter()
+    geometry_commit_path: luigi.StrParameter = luigi.StrParameter()
+
+    def output(self) -> list[luigi.Target]:
+        ctx = context.Context()
+        return [utils.task.FileTarget(ctx.database_dir, self, "msgpack")]
+
+    def run(self) -> None:
+        ctx = context.Context()
+
+        with open(self.tracking_path, "rb") as f:
+            tracking_data = msgpack.unpack(f)
+        ctx.logger.info(f"tracking_typename: {tracking_data["alt_typename"]}")
+
+        with open(self.tracking_commit_path, "rb") as f:
+            commit_data = msgpack.unpack(f)
+        ctx.logger.info(f"track_typename: {commit_data["track_typename"]}")
+
+        pcd = o3d.io.read_point_cloud(self.geometry_path)
+        ctx.logger.info(f"pcd_xyz: {np.asarray(pcd.points).shape}")
+
+        mesh = o3d.io.read_triangle_mesh(self.geometry_commit_path)
+        ctx.logger.info(f"mesh_vertices: {np.asarray(mesh.vertices).shape}, mesh_triangles: {np.asarray(mesh.triangles).shape}")
+
+        raise NotImplementedError("PackCommitTask is not implemented yet")
+
+        # data = {}
+        # ctx.logger.info("writing output to database")
+        # [output] = self.output()
+        # with output.open() as f:
+        #     msgpack.pack(data, f, use_bin_type=True)

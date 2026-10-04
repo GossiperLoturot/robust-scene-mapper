@@ -21,5 +21,8 @@ run_tagging:
 run_recoord:
 	@uv run src/run_recoord.py
 
-run_post:
-	@uv run src/run_post.py
+run_annotate:
+	@uv run src/run_annotate.py
+
+run_pack:
+	@uv run src/run_pack.py
