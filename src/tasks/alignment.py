@@ -61,7 +61,7 @@ class AlignmentTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FsTarget(ctx.database_dir, self)]
+        return [utils.task.FsDirTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -104,17 +104,11 @@ class AlignmentTask(luigi.Task):
             # write alignment data as NPZ format
             alignment_path = os.path.join(temp_dir, "alignment.npz")
             extrinsics = extrinsics_base @ np.linalg.inv(b2a_mat)
-            np.savez_compressed(
-                alignment_path,
-                b2a_mat=b2a_mat,
-                extrinsics=extrinsics,
-                intrinsics=intrinsics,
-                images_rgb=images_rgb,
-                masks_bool=masks_bool
-            )
+            np.savez_compressed(alignment_path, b2a_mat=b2a_mat, extrinsics=extrinsics, intrinsics=intrinsics, images_rgb=images_rgb, masks_bool=masks_bool)
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            assert isinstance(output, utils.task.FsDirTarget)
             shutil.move(alignment_path, output.open())
 
 
@@ -183,7 +177,7 @@ class SurfaceTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FsTarget(ctx.database_dir, self)]
+        return [utils.task.FsDirTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -240,6 +234,7 @@ class SurfaceTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            assert isinstance(output, utils.task.FsDirTarget)
             shutil.move(object_path, output.open())
             shutil.move(alignment_path, output.open())
 
@@ -336,7 +331,7 @@ class RefineSurfaceTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FsTarget(ctx.database_dir, self)]
+        return [utils.task.FsDirTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -367,6 +362,7 @@ class RefineSurfaceTask(luigi.Task):
             # read recoord commit data for fitting scale and origin
             with open(self.recoord_commit_path, "rb") as f:
                 commit_data = msgpack.unpack(f)
+            assert isinstance(commit_data, dict)
             commit_scale_mat, commit_position_mat = np.eye(4), np.eye(4)
             commit_scale_mat[:3, :3] *= np.array(commit_data["scale"], dtype=np.float32)
             commit_position_mat[:3, 3] = np.array(commit_data["position"], dtype=np.float32)
@@ -447,17 +443,11 @@ class RefineSurfaceTask(luigi.Task):
 
             # write alignment as npz format
             new_alignment_path = os.path.join(temp_dir, "alignment.npz")
-            np.savez_compressed(
-                new_alignment_path,
-                b2a_mat=b2a_mat,
-                extrinsics=extrinsics,
-                intrinsics=alignment_result["intrinsics"],
-                images_rgb=alignment_result["images_rgb"],
-                masks_bool=alignment_result["masks_bool"]
-            )
+            np.savez_compressed(new_alignment_path, b2a_mat=b2a_mat, extrinsics=extrinsics, intrinsics=alignment_result["intrinsics"], images_rgb=alignment_result["images_rgb"], masks_bool=alignment_result["masks_bool"])
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            assert isinstance(output, utils.task.FsDirTarget)
             shutil.move(object_path, output.open())
             shutil.move(tracking_path, output.open())
             shutil.move(new_alignment_path, output.open())

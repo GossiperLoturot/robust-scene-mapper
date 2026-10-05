@@ -9,7 +9,7 @@ import backports.zstd.tarfile as tarfile
 import luigi
 
 
-class FsTarget(luigi.Target):
+class FsDirTarget(luigi.Target):
     database_dir: str
     basename: str
 
@@ -72,7 +72,7 @@ class FsArchiveTarget(luigi.Target):
             yield archive
 
 
-class FileTarget(luigi.Target):
+class FsFileTarget(luigi.Target):
     database_dir: str
     basename: str
 

@@ -28,10 +28,14 @@ class DispatchTask(luigi.WrapperTask):
             commit_path = reply_path.replace(".commit.msgpack", ".msgpack")
             with open(commit_path, "rb") as f:
                 commit_data = msgpack.unpack(f)
+            assert isinstance(commit_data, dict)
+
             with open(reply_path, "rb") as f:
                 reply_data = msgpack.unpack(f)
+            assert isinstance(reply_data, dict)
 
-            if reply_data["tag"] == 0:
+            # quality tag check: bit 6 is set if the quality is good
+            if not (reply_data["tag"] & (1 << 6)):
                 ctx.logger.info(f"continue {reply_path} for quality tag check")
                 continue
 
