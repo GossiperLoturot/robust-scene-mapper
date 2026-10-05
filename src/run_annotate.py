@@ -24,6 +24,7 @@ class DispatchTask(luigi.WrapperTask):
             commit_path = reply_path.replace(".commit.msgpack", ".msgpack")
             with open(commit_path, "rb") as f:
                 commit_data = msgpack.unpack(f)
+            assert isinstance(commit_data, dict)
 
             task = tasks.commit.AnnotateCommitTask(
                 **commit_data["param"],
@@ -31,13 +32,6 @@ class DispatchTask(luigi.WrapperTask):
                 recoord_commit_path=reply_path,
             )
             all_tasks.append(task)
-
-            # task = tasks.commit.PlyCommitTask(
-            #     **commit_data["param"],
-            #     kernel_radius=self.kernel_radius,
-            #     recoord_commit_path=reply_path,
-            # )
-            # all_tasks.append(task)
         return all_tasks
 
 

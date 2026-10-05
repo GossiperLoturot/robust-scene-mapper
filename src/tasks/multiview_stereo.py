@@ -76,6 +76,7 @@ class PatchMatchStereoTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            assert isinstance(output, utils.task.FsArchiveTarget)
             with output.open() as archive:
                 archive.add(workspace_dir, arcname="dense")
 
@@ -122,7 +123,7 @@ class StereoFusionTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FsTarget(ctx.database_dir, self)]
+        return [utils.task.FsDirTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -162,5 +163,6 @@ class StereoFusionTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            assert isinstance(output, utils.task.FsDirTarget)
             shutil.move(refine_mask_dir, output.open())
             shutil.move(fused_path, output.open())

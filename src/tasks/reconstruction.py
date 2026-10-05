@@ -45,7 +45,7 @@ class ReconstructionTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FsTarget(ctx.database_dir, self)]
+        return [utils.task.FsDirTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -102,4 +102,5 @@ class ReconstructionTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            assert isinstance(output, utils.task.FsDirTarget)
             shutil.move(single_model_dir, output.open())

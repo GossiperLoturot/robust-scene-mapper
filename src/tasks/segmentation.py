@@ -35,7 +35,7 @@ class SegmentationTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FsTarget(ctx.database_dir, self)]
+        return [utils.task.FsDirTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -65,6 +65,7 @@ class SegmentationTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            assert isinstance(output, utils.task.FsDirTarget)
             shutil.move(segmentation_dir, output.open())
 
 
@@ -136,7 +137,7 @@ class LiftingTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FsTarget(ctx.database_dir, self)]
+        return [utils.task.FsDirTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -212,4 +213,5 @@ class LiftingTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            assert isinstance(output, utils.task.FsDirTarget)
             shutil.move(xyz_feats_path, output.open())

@@ -35,7 +35,7 @@ class ObjectMaskingTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FsTarget(ctx.database_dir, self)]
+        return [utils.task.FsDirTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -50,6 +50,7 @@ class ObjectMaskingTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            assert isinstance(output, utils.task.FsDirTarget)
             shutil.move(mask_dir, output.open())
 
 
@@ -90,7 +91,7 @@ class TrackingTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FsTarget(ctx.database_dir, self)]
+        return [utils.task.FsDirTarget(ctx.database_dir, self)]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -119,4 +120,5 @@ class TrackingTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [output] = self.output()
+            assert isinstance(output, utils.task.FsDirTarget)
             shutil.move(tracking_path, output.open())

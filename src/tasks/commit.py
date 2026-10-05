@@ -53,7 +53,7 @@ class TaggingCommitTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FileTarget(ctx.database_dir, self, "msgpack")]
+        return [utils.task.FsFileTarget(ctx.database_dir, self, "msgpack")]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -113,6 +113,7 @@ class TaggingCommitTask(luigi.Task):
         }
         ctx.logger.info("writing output to database")
         [output] = self.output()
+        assert isinstance(output, utils.task.FsFileTarget)
         with output.open() as f:
             msgpack.pack(data, f, use_bin_type=True)
 
@@ -168,7 +169,7 @@ class RecoordCommitTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FileTarget(ctx.database_dir, self, "msgpack")]
+        return [utils.task.FsFileTarget(ctx.database_dir, self, "msgpack")]
 
     def run(self) -> None:
         ctx = context.Context()
@@ -211,6 +212,7 @@ class RecoordCommitTask(luigi.Task):
         }
         ctx.logger.info("writing output to database")
         [output] = self.output()
+        assert isinstance(output, utils.task.FsFileTarget)
         with output.open() as f:
             msgpack.pack(data, f, use_bin_type=True)
 
@@ -276,8 +278,8 @@ class AnnotateCommitTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        tracking = utils.task.FileTarget(ctx.database_dir, self, "msgpack")
-        geometry = utils.task.FileTarget(ctx.database_dir, self, "ply")
+        tracking = utils.task.FsFileTarget(ctx.database_dir, self, "msgpack")
+        geometry = utils.task.FsFileTarget(ctx.database_dir, self, "ply")
         return [tracking, geometry]
 
     def run(self) -> None:
@@ -367,8 +369,10 @@ class AnnotateCommitTask(luigi.Task):
 
             ctx.logger.info("writing output to database")
             [tracking, geometry] = self.output()
+            assert isinstance(tracking, utils.task.FsFileTarget)
             with tracking.open() as f:
                 msgpack.pack(data, f, use_bin_type=True)
+            assert isinstance(geometry, utils.task.FsFileTarget)
             with geometry.open() as f, open(ply_path, "rb") as g:
                 f.write(g.read())
 
@@ -381,18 +385,20 @@ class PackCommitTask(luigi.Task):
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
-        return [utils.task.FileTarget(ctx.database_dir, self, "msgpack")]
+        return [utils.task.FsFileTarget(ctx.database_dir, self, "msgpack")]
 
     def run(self) -> None:
         ctx = context.Context()
 
         with open(self.tracking_path, "rb") as f:
             tracking_data = msgpack.unpack(f)
-        ctx.logger.info(f"tracking_typename: {tracking_data["alt_typename"]}")
+        assert isinstance(tracking_data, dict)
+        ctx.logger.info(f"tracking_typename: {tracking_data['alt_typename']}")
 
         with open(self.tracking_commit_path, "rb") as f:
             commit_data = msgpack.unpack(f)
-        ctx.logger.info(f"track_typename: {commit_data["track_typename"]}")
+        assert isinstance(commit_data, dict)
+        ctx.logger.info(f"track_typename: {commit_data['track_typename']}")
 
         pcd = o3d.io.read_point_cloud(self.geometry_path)
         ctx.logger.info(f"pcd_xyz: {np.asarray(pcd.points).shape}")
@@ -401,9 +407,3 @@ class PackCommitTask(luigi.Task):
         ctx.logger.info(f"mesh_vertices: {np.asarray(mesh.vertices).shape}, mesh_triangles: {np.asarray(mesh.triangles).shape}")
 
         raise NotImplementedError("PackCommitTask is not implemented yet")
-
-        # data = {}
-        # ctx.logger.info("writing output to database")
-        # [output] = self.output()
-        # with output.open() as f:
-        #     msgpack.pack(data, f, use_bin_type=True)

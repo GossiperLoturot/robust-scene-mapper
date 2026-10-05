@@ -1,6 +1,5 @@
 import logging
 import os
-import subprocess
 
 os.environ["TORCH_HOME"] = ".cache/torch"
 os.environ["HF_HOME"] = ".cache/huggingface"
@@ -39,14 +38,6 @@ def main() -> None:
     logger.info("download RF-DETR weights")
     transformers.RfDetrModel.from_pretrained("roboflow/rf-detr-large")
     transformers.RfDetrImageProcessor.from_pretrained("roboflow/rf-detr-large", device_map="auto")
-
-    logger.info("download Depth Anything 3 weights")
-    with subprocess.Popen(["uv", "run", "hf", "download", "depth-anything/DA3NESTED-GIANT-LARGE-1.1"], cwd="deps/depth-anything-3", stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as proc:
-        if proc.stdout:
-            for line in proc.stdout:
-                console.print(line, end="")
-        if proc.wait() != 0:
-            raise RuntimeError("failed to download Depth Anything 3 weights")
 
     logger.info("successfully downloaded all weights")
 
