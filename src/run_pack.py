@@ -20,9 +20,9 @@ class DispatchTask(luigi.WrapperTask):
 
         all_tasks = []
         for tracking_reply_path in glob.glob(os.path.join(ctx.database_dir, "AnnotateCommitTask*.commit.msgpack")):
-            tracking_commit_path = tracking_reply_path.replace(".commit.msgpack", ".msgpack")
-            if not os.path.exists(tracking_commit_path):
-                ctx.logger.warning(f"tracking commit not found: {tracking_commit_path}")
+            commit_path = tracking_reply_path.replace(".commit.msgpack", ".msgpack")
+            if not os.path.exists(commit_path):
+                ctx.logger.warning(f"commit not found: {commit_path}")
                 continue
 
             geometry_reply_path = tracking_reply_path.replace(".commit.msgpack", ".commit.glb")
@@ -30,14 +30,8 @@ class DispatchTask(luigi.WrapperTask):
                 ctx.logger.warning(f"geometry commit not found: {geometry_reply_path}")
                 continue
 
-            geometry_commit_path = tracking_reply_path.replace(".commit.msgpack", ".ply")
-            if not os.path.exists(geometry_commit_path):
-                ctx.logger.warning(f"geometry commit not found: {geometry_commit_path}")
-                continue
-
             task = tasks.commit.PackCommitTask(
-                tracking_path=tracking_commit_path,
-                geometry_path=geometry_commit_path,
+                data_path=commit_path,
                 tracking_commit_path=tracking_reply_path,
                 geometry_commit_path=geometry_reply_path,
             )

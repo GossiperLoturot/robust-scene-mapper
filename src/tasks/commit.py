@@ -380,8 +380,7 @@ class AnnotateCommitTask(luigi.Task):
 
 
 class PackCommitTask(luigi.Task):
-    tracking_path: luigi.StrParameter = luigi.StrParameter()
-    geometry_path: luigi.StrParameter = luigi.StrParameter()
+    data_path: luigi.StrParameter = luigi.StrParameter()
     tracking_commit_path: luigi.StrParameter = luigi.StrParameter()
     geometry_commit_path: luigi.StrParameter = luigi.StrParameter()
 
@@ -392,28 +391,28 @@ class PackCommitTask(luigi.Task):
     def run(self) -> None:
         ctx = context.Context()
 
-        with open(self.tracking_path, "rb") as f:
-            tracking_data = msgpack.unpack(f)
-        assert isinstance(tracking_data, dict)
-        ctx.logger.info(f"tracking_data: {tracking_data.keys()}")
+        with open(self.data_path, "rb") as f:
+            data = msgpack.unpack(f)
+        assert isinstance(data, dict)
+        ctx.logger.info(f"data: {data.keys()}")
 
         with open(self.tracking_commit_path, "rb") as f:
-            commit_data = msgpack.unpack(f)
-        assert isinstance(commit_data, dict)
-        ctx.logger.info(f"commit_data: {commit_data.keys()}")
+            tracking_commit_data = msgpack.unpack(f)
+        assert isinstance(tracking_commit_data, dict)
+        ctx.logger.info(f"tracking_commit_data: {tracking_commit_data.keys()}")
 
         # merge tracking data and commit data
-        tracking_data["alt_typemap"] = commit_data["track_typemap"]
-        tracking_data["alt_typename"] = commit_data["track_typename"]
-        commit_data = tracking_data
-        ctx.logger.info(f"finalized data: {commit_data.keys()}")
+        data["alt_typemap"] = tracking_commit_data["track_typemap"]
+        data["alt_typename"] = tracking_commit_data["track_typename"]
 
-        pcd = o3d.io.read_point_cloud(self.geometry_path)
-        ctx.logger.info(f"pcd_xyz: {np.asarray(pcd.points).shape}")
+        geometry_commit = trimesh.load_scene(self.geometry_commit_path)
+        ctx.logger.info(f"geometry_commit: {geometry_commit.metadata}")
 
-        scene = trimesh.load_scene(self.geometry_commit_path)
-        ctx.logger.info(f"scene: {scene}")
+        packed_data = utils.commit.packing(data, geometry_commit)
+        ctx.logger.info(f"packed_data: {packed_data.keys()}")
 
-        utils.commit.pack(tracking_data, pcd, scene)
-
-        raise NotImplementedError("PackCommitTask is not implemented yet")
+        ctx.logger.info("writing output to database")
+        [output] = self.output()
+        assert isinstance(output, utils.task.FsFileTarget)
+        with output.open() as f:
+            msgpack.pack(packed_data, f, use_bin_type=True)
