@@ -7,6 +7,7 @@ import msgpack
 import numpy as np
 import open3d as o3d
 import pycolmap
+import trimesh
 
 import context
 import tasks.alignment
@@ -14,6 +15,7 @@ import tasks.reconstruction
 import tasks.segmentation
 import tasks.video_sampling
 import utils.alignment
+import utils.commit
 import utils.segmentation
 import utils.task
 
@@ -393,17 +395,25 @@ class PackCommitTask(luigi.Task):
         with open(self.tracking_path, "rb") as f:
             tracking_data = msgpack.unpack(f)
         assert isinstance(tracking_data, dict)
-        ctx.logger.info(f"tracking_typename: {tracking_data['alt_typename']}")
+        ctx.logger.info(f"tracking_data: {tracking_data.keys()}")
 
         with open(self.tracking_commit_path, "rb") as f:
             commit_data = msgpack.unpack(f)
         assert isinstance(commit_data, dict)
-        ctx.logger.info(f"track_typename: {commit_data['track_typename']}")
+        ctx.logger.info(f"commit_data: {commit_data.keys()}")
+
+        # merge tracking data and commit data
+        tracking_data["alt_typemap"] = commit_data["track_typemap"]
+        tracking_data["alt_typename"] = commit_data["track_typename"]
+        commit_data = tracking_data
+        ctx.logger.info(f"finalized data: {commit_data.keys()}")
 
         pcd = o3d.io.read_point_cloud(self.geometry_path)
         ctx.logger.info(f"pcd_xyz: {np.asarray(pcd.points).shape}")
 
-        mesh = o3d.io.read_triangle_mesh(self.geometry_commit_path)
-        ctx.logger.info(f"mesh_vertices: {np.asarray(mesh.vertices).shape}, mesh_triangles: {np.asarray(mesh.triangles).shape}")
+        scene = trimesh.load_scene(self.geometry_commit_path)
+        ctx.logger.info(f"scene: {scene}")
+
+        utils.commit.pack(tracking_data, pcd, scene)
 
         raise NotImplementedError("PackCommitTask is not implemented yet")
