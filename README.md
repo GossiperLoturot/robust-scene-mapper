@@ -59,9 +59,12 @@ make run_download  # download model weights.
 
 make run_tagging
 # manually tag annotation working
+# make TaggingCommitTask*.commit.msgpack
 make run_recoord
 # manually re-coordinate working
+# make RecoordCommitTask*.commit.msgpack
 make run_annotate
 # manually tracking and road polygon creation working
+# make AnnotateCommitTask*.commit.msgpack and AnnotateCommitTask*.commit.glb
 make run_pack
 ```

@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import open3d as o3d
 import trimesh
 
 import context
@@ -9,8 +10,8 @@ import context
 def rasterize_pcd(verts: np.ndarray, class_ids: np.ndarray, res: int, downsample_res: int) -> np.ndarray:
     verts = verts / res * downsample_res
     verts = np.round(verts).astype(np.int32)
-    x = np.clip(verts[:, 0], 0, downsample_res - 1)
-    y = np.clip(verts[:, 1], 0, downsample_res - 1)
+    idx = (verts[:, 0] >= 0) & (verts[:, 0] < downsample_res) & (verts[:, 1] >= 0) & (verts[:, 1] < downsample_res)
+    x, y, class_ids = verts[idx, 0], verts[idx, 1], class_ids[idx]
 
     max_cls = class_ids.max() + 1
     pixel_idx = y * downsample_res + x
@@ -19,7 +20,7 @@ def rasterize_pcd(verts: np.ndarray, class_ids: np.ndarray, res: int, downsample
     unq_pixel_idx = unique_keys // max_cls
     unq_class_ids = unique_keys % max_cls
 
-    image = np.zeros(downsample_res * downsample_res, dtype=np.uint8)
+    image = np.full(downsample_res * downsample_res, 255, dtype=np.uint8)
     max_counts = np.zeros(downsample_res * downsample_res, dtype=np.int32)
     for p_idx, c_id, count in zip(unq_pixel_idx, unq_class_ids, counts, strict=True):
         if count > max_counts[p_idx]:
@@ -27,7 +28,7 @@ def rasterize_pcd(verts: np.ndarray, class_ids: np.ndarray, res: int, downsample
             image[p_idx] = c_id
     image = image.reshape((downsample_res, downsample_res))
 
-    image = cv2.resize(image, (res, res), interpolation=cv2.INTER_AREA)
+    image = cv2.resize(image, (res, res), interpolation=cv2.INTER_NEAREST)
     return np.array(image, dtype=np.uint8)
 
 
@@ -44,16 +45,25 @@ def rasterize_mesh(verts: np.ndarray, res: int) -> np.ndarray:
 # extnt: the bounding box size of the scene in meters
 # res: the resolution of the output image
 # downsample_res: the resolution for point cloud rasterization
-def packing(data: dict, geometry_commit: trimesh.Scene, extent: float = 10.0, res: int = 512, downsample_res: int = 128) -> dict:
+def packing(data: dict, geometry_commit: trimesh.Scene, extent: float = 20.0, res: int = 512, downsample_res: int = 128) -> dict:
     ctx = context.Context()
 
-    # matrix for 2D projection
-    mat = np.array([[0.5 * res / extent, 0.0], [0.0, 0.0], [0.0, 0.5 * res / extent], [0.5 * res, 0.5 * res]], dtype=np.float32)
+    # matrix for 2D projection [4, 4]
+    mat = np.array([
+        [0.5 * res / extent, 0.0, 0.0, 0.5 * res],
+        [0.0, 0.0, 0.5 * res / extent, 0.5 * res],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ], dtype=np.float32)
     ctx.logger.info(f"create projection matrix: {mat}")
 
     # read point cloud data
     verts = np.frombuffer(data["pcd_xyz"], dtype=np.float32).reshape(-1, 3)
     class_ids = np.frombuffer(data["pcd_typemap"], dtype=np.uint8).reshape(-1)
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(verts)
+    _, idx = pcd.remove_statistical_outlier(nb_neighbors=32, std_ratio=2.0)
+    verts, class_ids = verts[idx], class_ids[idx]
     # extract points in different height levels
     h0_mask = verts[:, 1] <= 0.25
     h1_mask = (verts[:, 1] <= 0.75) & (verts[:, 1] > 0.25)
@@ -62,14 +72,14 @@ def packing(data: dict, geometry_commit: trimesh.Scene, extent: float = 10.0, re
     h4_mask = (verts[:, 1] <= 2.25) & (verts[:, 1] > 1.75)
     # rasterization
     verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
-    h0_map = rasterize_pcd((verts_hom @ mat)[h0_mask], class_ids[h0_mask], res=res, downsample_res=downsample_res)
-    h1_map = rasterize_pcd((verts_hom @ mat)[h1_mask], class_ids[h1_mask], res=res, downsample_res=downsample_res)
-    h2_map = rasterize_pcd((verts_hom @ mat)[h2_mask], class_ids[h2_mask], res=res, downsample_res=downsample_res)
-    h3_map = rasterize_pcd((verts_hom @ mat)[h3_mask], class_ids[h3_mask], res=res, downsample_res=downsample_res)
-    h4_map = rasterize_pcd((verts_hom @ mat)[h4_mask], class_ids[h4_mask], res=res, downsample_res=downsample_res)
+    h0_map = rasterize_pcd((verts_hom @ mat.T)[h0_mask][:, [0, 1]], class_ids[h0_mask], res=res, downsample_res=downsample_res)
+    h1_map = rasterize_pcd((verts_hom @ mat.T)[h1_mask][:, [0, 1]], class_ids[h1_mask], res=res, downsample_res=downsample_res)
+    h2_map = rasterize_pcd((verts_hom @ mat.T)[h2_mask][:, [0, 1]], class_ids[h2_mask], res=res, downsample_res=downsample_res)
+    h3_map = rasterize_pcd((verts_hom @ mat.T)[h3_mask][:, [0, 1]], class_ids[h3_mask], res=res, downsample_res=downsample_res)
+    h4_map = rasterize_pcd((verts_hom @ mat.T)[h4_mask][:, [0, 1]], class_ids[h4_mask], res=res, downsample_res=downsample_res)
 
     # read road geometry
-    road_same_verts, road_opposite_verts, crossing_verts = [], [], []
+    road_same_verts, road_opposite_verts, crossing_verts, stopline_verts = [], [], [], []
     for geometry_name, node_names in geometry_commit.graph.geometry_nodes.items():
         mesh = geometry_commit.geometry.get(geometry_name)
         assert isinstance(mesh, trimesh.Trimesh)
@@ -85,23 +95,30 @@ def packing(data: dict, geometry_commit: trimesh.Scene, extent: float = 10.0, re
                 road_opposite_verts.append(verts[indices])
             if node_name.startswith("crossing"):
                 crossing_verts.append(verts[indices])
+            if node_name.startswith("stopline"):
+                stopline_verts.append(verts[indices])
     # road.same geometry
     verts = np.array(road_same_verts, dtype=np.float32).reshape(-1, 3)
     verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
-    road_same_map = rasterize_mesh(verts_hom @ mat, res=res)
+    road_same_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
     # road.opposite geometry
     verts = np.array(road_opposite_verts, dtype=np.float32).reshape(-1, 3)
     verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
-    road_opposite_map = rasterize_mesh(verts_hom @ mat, res=res)
+    road_opposite_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
     # crossing geometry
     verts = np.array(crossing_verts, dtype=np.float32).reshape(-1, 3)
     verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
-    crossing_map = rasterize_mesh(verts_hom @ mat, res=res)
+    crossing_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
+    # stopline geometry
+    verts = np.array(stopline_verts, dtype=np.float32).reshape(-1, 3)
+    verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
+    stopline_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
     # compose lane map
-    lane_map = np.zeros((res, res), dtype=np.uint8)
-    lane_map[road_same_map > 127] = 1
-    lane_map[road_opposite_map > 127] = 2
-    lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (crossing_map > 127)] = 3
+    lane_map = np.full((res, res), 255, dtype=np.uint8)
+    lane_map[road_same_map > 127] = 0
+    lane_map[road_opposite_map > 127] = 1
+    lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (crossing_map > 127)] = 2
+    lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (stopline_map > 127)] = 3
 
     # read sign
     sign_group = dict[str, list[float]]()
@@ -135,6 +152,7 @@ def packing(data: dict, geometry_commit: trimesh.Scene, extent: float = 10.0, re
     return {
         "param": data["param"],
         "resolution": res,
+        "3dhom_to_2d": mat.tobytes(),
         "h0_map": h0_map_enc.tobytes(),
         "h1_map": h1_map_enc.tobytes(),
         "h2_map": h2_map_enc.tobytes(),

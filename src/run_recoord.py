@@ -46,6 +46,7 @@ class DispatchTask(luigi.WrapperTask):
                 ransac_threshold=self.ransac_threshold,
                 max_depth=self.max_depth,
                 voxel_downsample=self.voxel_downsample,
+                tag=reply_data["tag"],
             )
             all_tasks.append(task)
         return all_tasks
