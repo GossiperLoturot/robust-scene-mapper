@@ -131,11 +131,13 @@ class RecoordCommitTask(luigi.Task):
     init_frame_width: luigi.IntParameter = luigi.IntParameter()
     init_frame_height: luigi.IntParameter = luigi.IntParameter()
     init_focal_length: luigi.FloatParameter = luigi.FloatParameter()
+
     highres_width: luigi.IntParameter = luigi.IntParameter()
     highres_height: luigi.IntParameter = luigi.IntParameter()
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
+    tag: luigi.IntParameter = luigi.IntParameter()
 
     def requires(self) -> list[luigi.Task]:
         surface = tasks.alignment.SurfaceTask(
@@ -206,6 +208,7 @@ class RecoordCommitTask(luigi.Task):
 
         data = {
             "param": self.param_kwargs,
+            "tag": self.tag,
             "ego_frames": ego_frames.tobytes(),
             "ego_xyz": ego_xyz.tobytes(),
             "ego_images": ego_images,
@@ -235,6 +238,8 @@ class AnnotateCommitTask(luigi.Task):
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
+    tag: luigi.IntParameter = luigi.IntParameter()
+
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
     recoord_commit_path: luigi.StrParameter = luigi.StrParameter()
 
@@ -352,6 +357,7 @@ class AnnotateCommitTask(luigi.Task):
             # output as msgpack file
             data = {
                 "param": self.param_kwargs,
+                "tag": self.tag,
                 "ego_frames": ego_frames.tobytes(),
                 "ego_xyz": ego_xyz.tobytes(),
                 "ego_images": ego_images,
