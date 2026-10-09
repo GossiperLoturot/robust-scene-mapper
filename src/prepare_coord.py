@@ -24,29 +24,29 @@ class DispatchTask(luigi.WrapperTask):
         ctx = context.Context()
 
         all_tasks = []
-        for reply_path in glob.glob(os.path.join(ctx.database_dir, "TaggingCommitTask*.commit.msgpack")):
-            commit_path = reply_path.replace(".commit.msgpack", ".msgpack")
+        for commit_path in glob.glob(os.path.join(ctx.database_dir, "PrepareTaggingTask*.commit.msgpack")):
             with open(commit_path, "rb") as f:
                 commit_data = msgpack.unpack(f)
             assert isinstance(commit_data, dict)
 
-            with open(reply_path, "rb") as f:
-                reply_data = msgpack.unpack(f)
-            assert isinstance(reply_data, dict)
+            prepare_path = commit_path.replace(".commit.msgpack", ".msgpack")
+            with open(prepare_path, "rb") as f:
+                prepare_data = msgpack.unpack(f)
+            assert isinstance(prepare_data, dict)
 
             # quality tag check: bit 6 is set if the quality is good
-            if not (reply_data["tag"] & (1 << 6)):
-                ctx.logger.info(f"continue {reply_path} for quality tag check")
+            if not (commit_data["tag"] & (1 << 6)):
+                ctx.logger.info(f"continue {commit_path} for quality tag check")
                 continue
 
-            task = tasks.commit.RecoordCommitTask(
-                **commit_data["param"],
+            task = tasks.commit.PrepareCoordTask(
+                **prepare_data["param"],
                 highres_width=self.highres_width,
                 highres_height=self.highres_height,
                 ransac_threshold=self.ransac_threshold,
                 max_depth=self.max_depth,
                 voxel_downsample=self.voxel_downsample,
-                tag=reply_data["tag"],
+                commit_tagging_path=commit_path,
             )
             all_tasks.append(task)
         return all_tasks

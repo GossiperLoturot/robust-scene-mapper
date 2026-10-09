@@ -20,7 +20,7 @@ import utils.segmentation
 import utils.task
 
 
-class TaggingCommitTask(luigi.Task):
+class PrepareTaggingTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -120,7 +120,7 @@ class TaggingCommitTask(luigi.Task):
             msgpack.pack(data, f, use_bin_type=True)
 
 
-class RecoordCommitTask(luigi.Task):
+class PrepareCoordTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -137,7 +137,7 @@ class RecoordCommitTask(luigi.Task):
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
-    tag: luigi.IntParameter = luigi.IntParameter()
+    commit_tagging_path: luigi.StrParameter = luigi.StrParameter()
 
     def requires(self) -> list[luigi.Task]:
         surface = tasks.alignment.SurfaceTask(
@@ -206,9 +206,15 @@ class RecoordCommitTask(luigi.Task):
         pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
         ctx.logger.info(f"pcd_xyz: {pcd_xyz.shape}, pcd_rgb: {pcd_rgb.shape}")
 
+        # read commit tagging data
+        with open(self.commit_tagging_path, "rb") as f:
+            commit_tagging_data = msgpack.unpack(f)
+        assert isinstance(commit_tagging_data, dict)
+        tag = commit_tagging_data["tag"]
+
         data = {
             "param": self.param_kwargs,
-            "tag": self.tag,
+            "tag": tag,
             "ego_frames": ego_frames.tobytes(),
             "ego_xyz": ego_xyz.tobytes(),
             "ego_images": ego_images,
@@ -222,7 +228,7 @@ class RecoordCommitTask(luigi.Task):
             msgpack.pack(data, f, use_bin_type=True)
 
 
-class AnnotateCommitTask(luigi.Task):
+class PrepareAnnotationTask(luigi.Task):
     input_path: luigi.StrParameter = luigi.StrParameter()
     fps: luigi.IntParameter = luigi.IntParameter()
     width: luigi.IntParameter = luigi.IntParameter()
@@ -238,12 +244,19 @@ class AnnotateCommitTask(luigi.Task):
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
-    tag: luigi.IntParameter = luigi.IntParameter()
+    commit_tagging_path: luigi.StrParameter = luigi.StrParameter()
 
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
-    recoord_commit_path: luigi.StrParameter = luigi.StrParameter()
+    commit_coord_path: luigi.StrParameter = luigi.StrParameter()
 
     def requires(self) -> list[luigi.Task]:
+        # read commit coord data
+        with open(self.commit_coord_path, "rb") as f:
+            commit_coord_data = msgpack.unpack(f)
+        assert isinstance(commit_coord_data, dict)
+        position = commit_coord_data["position"]
+        scale = commit_coord_data["scale"]
+
         refine_surface = tasks.alignment.RefineSurfaceTask(
             input_path=self.input_path,
             fps=self.fps,
@@ -260,7 +273,8 @@ class AnnotateCommitTask(luigi.Task):
             ransac_threshold=self.ransac_threshold,
             max_depth=self.max_depth,
             voxel_downsample=self.voxel_downsample,
-            recoord_commit_path=self.recoord_commit_path,
+            position=position,
+            scale=scale,
         )
         lifting = tasks.segmentation.LiftingTask(
             input_path=self.input_path,
@@ -279,7 +293,8 @@ class AnnotateCommitTask(luigi.Task):
             max_depth=self.max_depth,
             voxel_downsample=self.voxel_downsample,
             kernel_radius=self.kernel_radius,
-            recoord_commit_path=self.recoord_commit_path,
+            position=position,
+            scale=scale,
         )
         return [refine_surface, lifting]
 
@@ -317,20 +332,20 @@ class AnnotateCommitTask(luigi.Task):
             ctx.logger.info(f"ego_frames: {ego_frames.shape}, ego_xyz: {ego_xyz.shape}, ego_images: {len(ego_images)}")
 
             # read tracking trajectory
-            alt_frames, alt_xyz, alt_labels = [], [], []
+            other_frames, other_xyz, other_labels = [], [], []
             tracking = np.load(tracking_path, allow_pickle=True)
             for i, results in enumerate(tracking["all_results"]):
                 xyz, labels = results["centers"], results["labels"]
-                alt_frames.extend([i] * len(xyz))
-                alt_xyz.extend(xyz)
-                alt_labels.extend(labels)
-            alt_frames = np.array(alt_frames, dtype=np.int32)
-            alt_xyz = np.array(alt_xyz, dtype=np.float32)
-            alt_labels = np.array(alt_labels, dtype=np.dtypes.StringDType())
-            alt_typename, alt_typemap = np.unique(alt_labels, return_inverse=True)
-            alt_typemap = alt_typemap.astype(np.uint8)
-            alt_typename = alt_typename.tolist()
-            ctx.logger.info(f"alt_frames: {alt_frames.shape}, alt_xyz: {alt_xyz.shape}, alt_typemap: {alt_typemap.shape}, alt_typename: {len(alt_typename)}")
+                other_frames.extend([i] * len(xyz))
+                other_xyz.extend(xyz)
+                other_labels.extend(labels)
+            other_frames = np.array(other_frames, dtype=np.int32)
+            other_xyz = np.array(other_xyz, dtype=np.float32)
+            other_labels = np.array(other_labels, dtype=np.dtypes.StringDType())
+            other_typename, other_typemap = np.unique(other_labels, return_inverse=True)
+            other_typemap = other_typemap.astype(np.uint8)
+            other_typename = other_typename.tolist()
+            ctx.logger.info(f"other_frames: {other_frames.shape}, other_xyz: {other_xyz.shape}, other_typemap: {other_typemap.shape}, other_typename: {len(other_typename)}")
 
             # read dense point cloud
             pcd = o3d.io.read_point_cloud(surface_path)
@@ -354,17 +369,23 @@ class AnnotateCommitTask(luigi.Task):
             rgb = palette[feats]
             pcd.normals = o3d.utility.Vector3dVector(rgb.astype(np.float64) / 255.0)
 
+            # read commit tagging data
+            with open(self.commit_tagging_path, "rb") as f:
+                commit_tagging_data = msgpack.unpack(f)
+            assert isinstance(commit_tagging_data, dict)
+            tag = commit_tagging_data["tag"]
+
             # output as msgpack file
             data = {
                 "param": self.param_kwargs,
-                "tag": self.tag,
+                "tag": tag,
                 "ego_frames": ego_frames.tobytes(),
                 "ego_xyz": ego_xyz.tobytes(),
                 "ego_images": ego_images,
-                "alt_frames": alt_frames.tobytes(),
-                "alt_xyz": alt_xyz.tobytes(),
-                "alt_typemap": alt_typemap.tobytes(),
-                "alt_typename": alt_typename,
+                "other_frames": other_frames.tobytes(),
+                "other_xyz": other_xyz.tobytes(),
+                "other_typemap": other_typemap.tobytes(),
+                "other_typename": other_typename,
                 "pcd_xyz": pcd_xyz.tobytes(),
                 "pcd_rgb": pcd_rgb.tobytes(),
                 "pcd_typemap": pcd_typemap.tobytes(),
@@ -385,10 +406,10 @@ class AnnotateCommitTask(luigi.Task):
                 f.write(g.read())
 
 
-class PackCommitTask(luigi.Task):
-    data_path: luigi.StrParameter = luigi.StrParameter()
-    tracking_commit_path: luigi.StrParameter = luigi.StrParameter()
-    geometry_commit_path: luigi.StrParameter = luigi.StrParameter()
+class PackTask(luigi.Task):
+    prepare_path: luigi.StrParameter = luigi.StrParameter()
+    commit_annotation_msgpack: luigi.StrParameter = luigi.StrParameter()
+    commit_annotation_gltf: luigi.StrParameter = luigi.StrParameter()
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
@@ -397,28 +418,28 @@ class PackCommitTask(luigi.Task):
     def run(self) -> None:
         ctx = context.Context()
 
-        with open(self.data_path, "rb") as f:
-            data = msgpack.unpack(f)
-        assert isinstance(data, dict)
-        ctx.logger.info(f"data: {data.keys()}")
+        with open(self.prepare_path, "rb") as f:
+            prepare_data = msgpack.unpack(f)
+        assert isinstance(prepare_data, dict)
+        ctx.logger.info(f"prepare_data: {prepare_data.keys()}")
 
-        with open(self.tracking_commit_path, "rb") as f:
-            tracking_commit_data = msgpack.unpack(f)
-        assert isinstance(tracking_commit_data, dict)
-        ctx.logger.info(f"tracking_commit_data: {tracking_commit_data.keys()}")
+        with open(self.commit_annotation_msgpack, "rb") as f:
+            commit_annotation_data = msgpack.unpack(f)
+        assert isinstance(commit_annotation_data, dict)
+        ctx.logger.info(f"commit_annotation_data: {commit_annotation_data.keys()}")
 
         # merge tracking data and commit data
-        data["alt_typemap"] = tracking_commit_data["track_typemap"]
-        data["alt_typename"] = tracking_commit_data["track_typename"]
+        prepare_data["other_typemap"] = commit_annotation_data["other_typemap"]
+        prepare_data["other_typename"] = commit_annotation_data["other_typename"]
 
-        geometry_commit = trimesh.load_scene(self.geometry_commit_path)
-        ctx.logger.info(f"geometry_commit: {geometry_commit.metadata}")
+        commit_annotation_geometry = trimesh.load_scene(self.commit_annotation_gltf)
+        ctx.logger.info(f"commit_annotation_geometry: {commit_annotation_geometry.metadata}")
 
-        packed_data = utils.commit.packing(data, geometry_commit)
-        ctx.logger.info(f"packed_data: {packed_data.keys()}")
+        pack_data = utils.commit.pack(prepare_data, commit_annotation_geometry)
+        ctx.logger.info(f"pack_data: {pack_data.keys()}")
 
         ctx.logger.info("writing output to database")
         [output] = self.output()
         assert isinstance(output, utils.task.FsFileTarget)
         with output.open() as f:
-            msgpack.pack(packed_data, f, use_bin_type=True)
+            msgpack.pack(pack_data, f, use_bin_type=True)

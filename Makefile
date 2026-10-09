@@ -1,4 +1,4 @@
-.PHONY: build check fix run_download run_tagging run_recoord run_post
+.PHONY: build check fix run_download prepare_tagging prepare_coord prepare_annotation run_pack
 
 build:
 	@uv sync
@@ -15,14 +15,14 @@ fix:
 run_download:
 	@uv run src/run_download.py
 
-run_tagging:
-	@uv run src/run_tagging.py
+prepare_tagging:
+	@uv run src/prepare_tagging.py
 
-run_recoord:
-	@uv run src/run_recoord.py
+prepare_coord:
+	@uv run src/prepare_coord.py
 
-run_annotate:
-	@uv run src/run_annotate.py
+prepare_annotation:
+	@uv run src/prepare_annotation.py
 
 run_pack:
 	@uv run src/run_pack.py

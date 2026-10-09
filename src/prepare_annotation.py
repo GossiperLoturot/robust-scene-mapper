@@ -20,16 +20,16 @@ class DispatchTask(luigi.WrapperTask):
         ctx = context.Context()
 
         all_tasks = []
-        for reply_path in glob.glob(os.path.join(ctx.database_dir, "RecoordCommitTask*.commit.msgpack")):
-            commit_path = reply_path.replace(".commit.msgpack", ".msgpack")
-            with open(commit_path, "rb") as f:
-                commit_data = msgpack.unpack(f)
-            assert isinstance(commit_data, dict)
+        for commit_path in glob.glob(os.path.join(ctx.database_dir, "PrepareCoordTask*.commit.msgpack")):
+            prepare_path = commit_path.replace(".commit.msgpack", ".msgpack")
+            with open(prepare_path, "rb") as f:
+                prepare_data = msgpack.unpack(f)
+            assert isinstance(prepare_data, dict)
 
-            task = tasks.commit.AnnotateCommitTask(
-                **commit_data["param"],
+            task = tasks.commit.PrepareAnnotationTask(
+                **prepare_data["param"],
                 kernel_radius=self.kernel_radius,
-                recoord_commit_path=reply_path,
+                commit_coord_path=commit_path,
             )
             all_tasks.append(task)
         return all_tasks

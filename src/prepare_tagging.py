@@ -27,7 +27,7 @@ class DispatchTask(luigi.WrapperTask):
     def requires(self) -> list[luigi.Task]:
         all_tasks = []
         for input_path in glob.glob(os.path.join(self.input_dir, "*.mp4")):
-            task = tasks.commit.TaggingCommitTask(
+            task = tasks.commit.PrepareTaggingTask(
                 input_path=input_path,
                 fps=self.fps,
                 width=self.width,

@@ -3,7 +3,6 @@ import shutil
 import tempfile
 
 import luigi
-import msgpack
 import numpy as np
 import open3d as o3d
 import pycolmap
@@ -256,7 +255,8 @@ class RefineSurfaceTask(luigi.Task):
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()  # [0.0, 1.0]
     max_depth: luigi.FloatParameter = luigi.FloatParameter()  # [m]
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [m]
-    recoord_commit_path: luigi.StrParameter = luigi.StrParameter()
+    position: luigi.ListParameter = luigi.ListParameter()  # [x, y, z]
+    scale: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self) -> list[luigi.Task]:
         reconstruction = tasks.reconstruction.ReconstructionTask(
@@ -359,13 +359,10 @@ class RefineSurfaceTask(luigi.Task):
             images_rgb = alignment_result["images_rgb"]
             masks_bool = alignment_result["masks_bool"]
 
-            # read recoord commit data for fitting scale and origin
-            with open(self.recoord_commit_path, "rb") as f:
-                commit_data = msgpack.unpack(f)
-            assert isinstance(commit_data, dict)
+            # apply commit coordinate
             commit_scale_mat, commit_position_mat = np.eye(4), np.eye(4)
-            commit_scale_mat[:3, :3] *= np.array(commit_data["scale"], dtype=np.float32)
-            commit_position_mat[:3, 3] = np.array(commit_data["position"], dtype=np.float32)
+            commit_scale_mat[:3, :3] *= np.array(self.scale, dtype=np.float32)
+            commit_position_mat[:3, 3] = np.array(self.position, dtype=np.float32)
             b2a_mat = commit_position_mat @ commit_scale_mat @ b2a_mat
 
             # transform extrinsics to align with the recoord commit

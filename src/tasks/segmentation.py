@@ -85,7 +85,8 @@ class LiftingTask(luigi.Task):
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
-    recoord_commit_path: luigi.StrParameter = luigi.StrParameter()
+    position: luigi.ListParameter = luigi.ListParameter()
+    scale: luigi.FloatParameter = luigi.FloatParameter()
 
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()  # [0, 1]
 
@@ -131,7 +132,8 @@ class LiftingTask(luigi.Task):
             ransac_threshold=self.ransac_threshold,
             max_depth=self.max_depth,
             voxel_downsample=self.voxel_downsample,
-            recoord_commit_path=self.recoord_commit_path,
+            position=self.position,
+            scale=self.scale,
         )
         return [segmentation, object_masking, reconstruction, refine_surface]
 
