@@ -19,21 +19,21 @@ class DispatchTask(luigi.WrapperTask):
         ctx = context.Context()
 
         all_tasks = []
-        for tracking_reply_path in glob.glob(os.path.join(ctx.database_dir, "AnnotateCommitTask*.commit.msgpack")):
-            commit_path = tracking_reply_path.replace(".commit.msgpack", ".msgpack")
-            if not os.path.exists(commit_path):
-                ctx.logger.warning(f"commit not found: {commit_path}")
+        for commit_msgpack in glob.glob(os.path.join(ctx.database_dir, "PrepareAnnotationTask*.commit.msgpack")):
+            prepare_path = commit_msgpack.replace(".commit.msgpack", ".msgpack")
+            if not os.path.exists(prepare_path):
+                ctx.logger.warning(f"prepare data not found: {prepare_path}")
                 continue
 
-            geometry_reply_path = tracking_reply_path.replace(".commit.msgpack", ".commit.glb")
-            if not os.path.exists(geometry_reply_path):
-                ctx.logger.warning(f"geometry commit not found: {geometry_reply_path}")
+            commit_gltf = commit_msgpack.replace(".commit.msgpack", ".commit.glb")
+            if not os.path.exists(commit_gltf):
+                ctx.logger.warning(f"commit geometry not found: {commit_gltf}")
                 continue
 
-            task = tasks.commit.PackCommitTask(
-                data_path=commit_path,
-                tracking_commit_path=tracking_reply_path,
-                geometry_commit_path=geometry_reply_path,
+            task = tasks.commit.PackTask(
+                prepare_path=prepare_path,
+                commit_annotation_msgpack=commit_msgpack,
+                commit_annotation_gltf=commit_gltf,
             )
             all_tasks.append(task)
         return all_tasks

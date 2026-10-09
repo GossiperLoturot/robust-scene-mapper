@@ -45,16 +45,11 @@ def rasterize_mesh(verts: np.ndarray, res: int) -> np.ndarray:
 # extnt: the bounding box size of the scene in meters
 # res: the resolution of the output image
 # downsample_res: the resolution for point cloud rasterization
-def packing(data: dict, geometry_commit: trimesh.Scene, extent: float = 20.0, res: int = 512, downsample_res: int = 128) -> dict:
+def pack(data: dict, geometry: trimesh.Scene, extent: float = 20.0, res: int = 512, downsample_res: int = 128) -> dict:
     ctx = context.Context()
 
     # matrix for 2D projection [4, 4]
-    mat = np.array([
-        [0.5 * res / extent, 0.0, 0.0, 0.5 * res],
-        [0.0, 0.0, 0.5 * res / extent, 0.5 * res],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0]
-    ], dtype=np.float32)
+    mat = np.array([[0.5 * res / extent, 0.0, 0.0, 0.5 * res], [0.0, 0.0, 0.5 * res / extent, 0.5 * res], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float32)
     ctx.logger.info(f"create projection matrix: {mat}")
 
     # read point cloud data
@@ -80,18 +75,18 @@ def packing(data: dict, geometry_commit: trimesh.Scene, extent: float = 20.0, re
 
     # read road geometry
     road_same_verts, road_opposite_verts, crossing_verts, stopline_verts = [], [], [], []
-    for geometry_name, node_names in geometry_commit.graph.geometry_nodes.items():
-        mesh = geometry_commit.geometry.get(geometry_name)
+    for geometry_name, node_names in geometry.graph.geometry_nodes.items():
+        mesh = geometry.geometry.get(geometry_name)
         assert isinstance(mesh, trimesh.Trimesh)
         for node_name in node_names:
-            transform, _ = geometry_commit.graph.get(node_name)
+            transform, _ = geometry.graph.get(node_name)
             verts = trimesh.transformations.transform_points(mesh.vertices, transform).reshape(-1, 3)
             indices = mesh.faces.reshape(-1)
             assert isinstance(verts, np.ndarray) and isinstance(indices, np.ndarray)
             # group by
-            if node_name.startswith("road.same"):
+            if node_name.startswith("lane.same"):
                 road_same_verts.append(verts[indices])
-            if node_name.startswith("road.opposite"):
+            if node_name.startswith("lane.opposite"):
                 road_opposite_verts.append(verts[indices])
             if node_name.startswith("crossing"):
                 crossing_verts.append(verts[indices])
@@ -122,9 +117,9 @@ def packing(data: dict, geometry_commit: trimesh.Scene, extent: float = 20.0, re
 
     # read sign
     sign_group = dict[str, list[float]]()
-    for node_name in geometry_commit.graph.nodes:
+    for node_name in geometry.graph.nodes:
         if node_name.startswith("S"):
-            transform, _ = geometry_commit.graph.get(node_name)
+            transform, _ = geometry.graph.get(node_name)
             position = transform[:3, 3]
             sign_group[node_name] = position.tolist()
 
@@ -134,9 +129,9 @@ def packing(data: dict, geometry_commit: trimesh.Scene, extent: float = 20.0, re
     ego_trajectory = np.frombuffer(data["ego_xyz"], dtype=np.float32).reshape(-1, 3)
     trajectory_group["ego"] = ego_trajectory.tobytes()
     # read other trajectory
-    other_trajectory = np.frombuffer(data["alt_xyz"], dtype=np.float32).reshape(-1, 3)
-    other_trajectory_typemap = np.frombuffer(data["alt_typemap"], dtype=np.uint8).reshape(-1)
-    other_trajectory_typename = data["alt_typename"]
+    other_trajectory = np.frombuffer(data["other_xyz"], dtype=np.float32).reshape(-1, 3)
+    other_trajectory_typemap = np.frombuffer(data["other_typemap"], dtype=np.uint8).reshape(-1)
+    other_trajectory_typename = data["other_typename"]
     for id in np.unique(other_trajectory_typemap):
         name = other_trajectory_typename[id]
         trajectory = other_trajectory[other_trajectory_typemap == id]
