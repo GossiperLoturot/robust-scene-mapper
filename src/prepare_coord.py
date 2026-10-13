@@ -18,7 +18,7 @@ class DispatchTask(luigi.WrapperTask):
     highres_height: luigi.IntParameter = luigi.IntParameter()
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
-    voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
+    random_downsample: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self) -> list[luigi.Task]:
         ctx = context.Context()
@@ -45,7 +45,7 @@ class DispatchTask(luigi.WrapperTask):
                 highres_height=self.highres_height,
                 ransac_threshold=self.ransac_threshold,
                 max_depth=self.max_depth,
-                voxel_downsample=self.voxel_downsample,
+                random_downsample=self.random_downsample,
                 commit_tagging_path=commit_path,
             )
             all_tasks.append(task)

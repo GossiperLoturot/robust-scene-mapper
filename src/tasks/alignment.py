@@ -127,7 +127,7 @@ class SurfaceTask(luigi.Task):
 
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()  # [0.0, 1.0]
     max_depth: luigi.FloatParameter = luigi.FloatParameter()  # [m]
-    voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [m]
+    random_downsample: luigi.FloatParameter = luigi.FloatParameter()  # [m]
 
     def requires(self) -> list[luigi.Task]:
         alignment = AlignmentTask(
@@ -219,8 +219,8 @@ class SurfaceTask(luigi.Task):
             pcd_surface = o3d.geometry.PointCloud()
             pcd_surface.points = o3d.utility.Vector3dVector(points)
             pcd_surface.colors = o3d.utility.Vector3dVector(colors)
-            if self.voxel_downsample > 0.0:
-                pcd_surface = pcd_surface.voxel_down_sample(self.voxel_downsample)
+            if self.random_downsample > 0.0:
+                pcd_surface = pcd_surface.random_down_sample(self.random_downsample)
 
             # write points as PLY format
             object_path = os.path.join(temp_dir, "object.ply")
@@ -432,6 +432,12 @@ class RefineSurfaceTask(luigi.Task):
 
             object_path = os.path.join(temp_dir, "object.ply")
             pcd = pcd_ref + pcd_surface
+            # attach height value
+            points = np.asarray(pcd.points)
+            embedding = np.zeros(points.shape, dtype=np.float32)
+            embedding[:, 0] = points[:, 1] - model(points[:, [0, 2]])
+            pcd.normals = o3d.utility.Vector3dVector(embedding)
+            # write points as PLY format
             o3d.io.write_point_cloud(object_path, pcd, write_ascii=False, compressed=True)
 
             # write tracking as npz format

@@ -54,17 +54,18 @@ def pack(data: dict, geometry: trimesh.Scene, extent: float = 20.0, res: int = 5
 
     # read point cloud data
     verts = np.frombuffer(data["pcd_xyz"], dtype=np.float32).reshape(-1, 3)
+    verts_h = np.frombuffer(data["pcd_h"], dtype=np.float32).reshape(-1)
     class_ids = np.frombuffer(data["pcd_typemap"], dtype=np.uint8).reshape(-1)
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(verts)
     _, idx = pcd.remove_statistical_outlier(nb_neighbors=32, std_ratio=2.0)
-    verts, class_ids = verts[idx], class_ids[idx]
+    verts, verts_h, class_ids = verts[idx], verts_h[idx], class_ids[idx]
     # extract points in different height levels
-    h0_mask = verts[:, 1] <= 0.25
-    h1_mask = (verts[:, 1] <= 0.75) & (verts[:, 1] > 0.25)
-    h2_mask = (verts[:, 1] <= 1.25) & (verts[:, 1] > 0.75)
-    h3_mask = (verts[:, 1] <= 1.75) & (verts[:, 1] > 1.25)
-    h4_mask = (verts[:, 1] <= 2.25) & (verts[:, 1] > 1.75)
+    h0_mask = verts_h <= 0.25
+    h1_mask = (verts_h <= 0.75) & (verts_h > 0.25)
+    h2_mask = (verts_h <= 1.25) & (verts_h > 0.75)
+    h3_mask = (verts_h <= 1.75) & (verts_h > 1.25)
+    h4_mask = (verts_h <= 2.25) & (verts_h > 1.75)
     # rasterization
     verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
     h0_map = rasterize_pcd((verts_hom @ mat.T)[h0_mask][:, [0, 1]], class_ids[h0_mask], res=res, downsample_res=downsample_res)
@@ -88,7 +89,7 @@ def pack(data: dict, geometry: trimesh.Scene, extent: float = 20.0, res: int = 5
                 road_same_verts.append(verts[indices])
             if node_name.startswith("lane.opposite"):
                 road_opposite_verts.append(verts[indices])
-            if node_name.startswith("crossing"):
+            if node_name.startswith("crosswalk"):
                 crossing_verts.append(verts[indices])
             if node_name.startswith("stopline"):
                 stopline_verts.append(verts[indices])
@@ -103,7 +104,7 @@ def pack(data: dict, geometry: trimesh.Scene, extent: float = 20.0, res: int = 5
     # crossing geometry
     verts = np.array(crossing_verts, dtype=np.float32).reshape(-1, 3)
     verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
-    crossing_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
+    crosswalk_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
     # stopline geometry
     verts = np.array(stopline_verts, dtype=np.float32).reshape(-1, 3)
     verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
@@ -112,8 +113,9 @@ def pack(data: dict, geometry: trimesh.Scene, extent: float = 20.0, res: int = 5
     lane_map = np.full((res, res), 255, dtype=np.uint8)
     lane_map[road_same_map > 127] = 0
     lane_map[road_opposite_map > 127] = 1
-    lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (crossing_map > 127)] = 2
-    lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (stopline_map > 127)] = 3
+    lane_map[(road_same_map > 127) & (road_opposite_map > 127)] = 2
+    lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (crosswalk_map > 127)] = 3
+    lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (stopline_map > 127)] = 4
 
     # read sign
     sign_group = dict[str, list[float]]()

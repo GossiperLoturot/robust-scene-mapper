@@ -136,7 +136,7 @@ class PrepareCoordTask(luigi.Task):
     highres_height: luigi.IntParameter = luigi.IntParameter()
     ransac_threshold: luigi.FloatParameter = luigi.FloatParameter()
     max_depth: luigi.FloatParameter = luigi.FloatParameter()
-    voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
+    random_downsample: luigi.FloatParameter = luigi.FloatParameter()
     commit_tagging_path: luigi.StrParameter = luigi.StrParameter()
 
     def requires(self) -> list[luigi.Task]:
@@ -155,7 +155,7 @@ class PrepareCoordTask(luigi.Task):
             highres_height=self.highres_height,
             ransac_threshold=self.ransac_threshold,
             max_depth=self.max_depth,
-            voxel_downsample=self.voxel_downsample,
+            random_downsample=self.random_downsample,
         )
         alignment = tasks.alignment.AlignmentTask(
             input_path=self.input_path,
@@ -352,7 +352,8 @@ class PrepareAnnotationTask(luigi.Task):
             pcd_xyz = np.array(pcd.points, dtype=np.float32)
             pcd_rgb = np.array(pcd.colors, dtype=np.float32)
             pcd_rgb = (pcd_rgb * 255.0).astype(np.uint8)
-            ctx.logger.info(f"pcd_xyz: {pcd_xyz.shape}, pcd_rgb: {pcd_rgb.shape}")
+            pcd_h = np.array(pcd.normals, dtype=np.float32)[:, 0]
+            ctx.logger.info(f"pcd_xyz: {pcd_xyz.shape}, pcd_rgb: {pcd_rgb.shape}, pcd_h: {pcd_h.shape}")
 
             # read dense point cloud semantic segmentation
             lifting = np.load(lifting_path)
@@ -388,6 +389,7 @@ class PrepareAnnotationTask(luigi.Task):
                 "other_typename": other_typename,
                 "pcd_xyz": pcd_xyz.tobytes(),
                 "pcd_rgb": pcd_rgb.tobytes(),
+                "pcd_h": pcd_h.tobytes(),
                 "pcd_typemap": pcd_typemap.tobytes(),
                 "pcd_typename": pcd_typename,
             }

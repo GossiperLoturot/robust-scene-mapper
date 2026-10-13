@@ -14,6 +14,7 @@ import tasks.commit
 
 
 class DispatchTask(luigi.WrapperTask):
+    voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self) -> list[luigi.Task]:
@@ -26,8 +27,11 @@ class DispatchTask(luigi.WrapperTask):
                 prepare_data = msgpack.unpack(f)
             assert isinstance(prepare_data, dict)
 
+            param = prepare_data["param"]
+            del param["random_downsample"]
             task = tasks.commit.PrepareAnnotationTask(
-                **prepare_data["param"],
+                **param,
+                voxel_downsample=self.voxel_downsample,
                 kernel_radius=self.kernel_radius,
                 commit_coord_path=commit_path,
             )
