@@ -34,8 +34,8 @@ class DispatchTask(luigi.WrapperTask):
                 prepare_data = msgpack.unpack(f)
             assert isinstance(prepare_data, dict)
 
-            # quality tag check: bit 6 is set if the quality is good
-            if not (commit_data["tag"] & (1 << 6)):
+            # quality tag check: bit 0 or 1 is set if the quality is good
+            if not (commit_data["quality_tag"] & (0x0000_0011)):
                 ctx.logger.info(f"continue {commit_path} for quality tag check")
                 continue
 

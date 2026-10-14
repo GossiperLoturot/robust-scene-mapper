@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import open3d as o3d
-import trimesh
 
 import context
 
@@ -45,7 +44,7 @@ def rasterize_mesh(verts: np.ndarray, res: int) -> np.ndarray:
 # extnt: the bounding box size of the scene in meters
 # res: the resolution of the output image
 # downsample_res: the resolution for point cloud rasterization
-def pack(data: dict, geometry: trimesh.Scene, extent: float = 20.0, res: int = 512, downsample_res: int = 128) -> dict:
+def pack(data: dict, extent: float = 20.0, res: int = 512, downsample_res: int = 128) -> dict:
     ctx = context.Context()
 
     # matrix for 2D projection [4, 4]
@@ -74,56 +73,56 @@ def pack(data: dict, geometry: trimesh.Scene, extent: float = 20.0, res: int = 5
     h3_map = rasterize_pcd((verts_hom @ mat.T)[h3_mask][:, [0, 1]], class_ids[h3_mask], res=res, downsample_res=downsample_res)
     h4_map = rasterize_pcd((verts_hom @ mat.T)[h4_mask][:, [0, 1]], class_ids[h4_mask], res=res, downsample_res=downsample_res)
 
-    # read road geometry
-    road_same_verts, road_opposite_verts, crossing_verts, stopline_verts = [], [], [], []
-    for geometry_name, node_names in geometry.graph.geometry_nodes.items():
-        mesh = geometry.geometry.get(geometry_name)
-        assert isinstance(mesh, trimesh.Trimesh)
-        for node_name in node_names:
-            transform, _ = geometry.graph.get(node_name)
-            verts = trimesh.transformations.transform_points(mesh.vertices, transform).reshape(-1, 3)
-            indices = mesh.faces.reshape(-1)
-            assert isinstance(verts, np.ndarray) and isinstance(indices, np.ndarray)
-            # group by
-            if node_name.startswith("lane.same"):
-                road_same_verts.append(verts[indices])
-            if node_name.startswith("lane.opposite"):
-                road_opposite_verts.append(verts[indices])
-            if node_name.startswith("crosswalk"):
-                crossing_verts.append(verts[indices])
-            if node_name.startswith("stopline"):
-                stopline_verts.append(verts[indices])
-    # road.same geometry
-    verts = np.array(road_same_verts, dtype=np.float32).reshape(-1, 3)
-    verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
-    road_same_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
-    # road.opposite geometry
-    verts = np.array(road_opposite_verts, dtype=np.float32).reshape(-1, 3)
-    verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
-    road_opposite_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
-    # crossing geometry
-    verts = np.array(crossing_verts, dtype=np.float32).reshape(-1, 3)
-    verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
-    crosswalk_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
-    # stopline geometry
-    verts = np.array(stopline_verts, dtype=np.float32).reshape(-1, 3)
-    verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
-    stopline_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
-    # compose lane map
-    lane_map = np.full((res, res), 255, dtype=np.uint8)
-    lane_map[road_same_map > 127] = 0
-    lane_map[road_opposite_map > 127] = 1
-    lane_map[(road_same_map > 127) & (road_opposite_map > 127)] = 2
-    lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (crosswalk_map > 127)] = 3
-    lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (stopline_map > 127)] = 4
+    # # read road geometry
+    # road_same_verts, road_opposite_verts, crossing_verts, stopline_verts = [], [], [], []
+    # for geometry_name, node_names in geometry.graph.geometry_nodes.items():
+    #     mesh = geometry.geometry.get(geometry_name)
+    #     assert isinstance(mesh, trimesh.Trimesh)
+    #     for node_name in node_names:
+    #         transform, _ = geometry.graph.get(node_name)
+    #         verts = trimesh.transformations.transform_points(mesh.vertices, transform).reshape(-1, 3)
+    #         indices = mesh.faces.reshape(-1)
+    #         assert isinstance(verts, np.ndarray) and isinstance(indices, np.ndarray)
+    #         # group by
+    #         if node_name.startswith("lane.same"):
+    #             road_same_verts.append(verts[indices])
+    #         if node_name.startswith("lane.opposite"):
+    #             road_opposite_verts.append(verts[indices])
+    #         if node_name.startswith("crosswalk"):
+    #             crossing_verts.append(verts[indices])
+    #         if node_name.startswith("stopline"):
+    #             stopline_verts.append(verts[indices])
+    # # road.same geometry
+    # verts = np.array(road_same_verts, dtype=np.float32).reshape(-1, 3)
+    # verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
+    # road_same_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
+    # # road.opposite geometry
+    # verts = np.array(road_opposite_verts, dtype=np.float32).reshape(-1, 3)
+    # verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
+    # road_opposite_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
+    # # crossing geometry
+    # verts = np.array(crossing_verts, dtype=np.float32).reshape(-1, 3)
+    # verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
+    # crosswalk_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
+    # # stopline geometry
+    # verts = np.array(stopline_verts, dtype=np.float32).reshape(-1, 3)
+    # verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
+    # stopline_map = rasterize_mesh((verts_hom @ mat.T)[:, [0, 1]], res=res)
+    # # compose lane map
+    # lane_map = np.full((res, res), 255, dtype=np.uint8)
+    # lane_map[road_same_map > 127] = 0
+    # lane_map[road_opposite_map > 127] = 1
+    # lane_map[(road_same_map > 127) & (road_opposite_map > 127)] = 2
+    # lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (crosswalk_map > 127)] = 3
+    # lane_map[((road_same_map > 127) | (road_opposite_map > 127)) & (stopline_map > 127)] = 4
 
-    # read sign
-    sign_group = dict[str, list[float]]()
-    for node_name in geometry.graph.nodes:
-        if node_name.startswith("S"):
-            transform, _ = geometry.graph.get(node_name)
-            position = transform[:3, 3]
-            sign_group[node_name] = position.tolist()
+    # # read sign
+    # sign_group = dict[str, list[float]]()
+    # for node_name in geometry.graph.nodes:
+    #     if node_name.startswith("S"):
+    #         transform, _ = geometry.graph.get(node_name)
+    #         position = transform[:3, 3]
+    #         sign_group[node_name] = position.tolist()
 
     # create trajectory group
     trajectory_group = dict[str, bytes]()
@@ -145,7 +144,7 @@ def pack(data: dict, geometry: trimesh.Scene, extent: float = 20.0, res: int = 5
     _, h2_map_enc = cv2.imencode(".png", h2_map)
     _, h3_map_enc = cv2.imencode(".png", h3_map)
     _, h4_map_enc = cv2.imencode(".png", h4_map)
-    _, lane_map_enc = cv2.imencode(".png", lane_map)
+    # _, lane_map_enc = cv2.imencode(".png", lane_map)
     return {
         "param": data["param"],
         "resolution": res,
@@ -155,8 +154,8 @@ def pack(data: dict, geometry: trimesh.Scene, extent: float = 20.0, res: int = 5
         "h2_map": h2_map_enc.tobytes(),
         "h3_map": h3_map_enc.tobytes(),
         "h4_map": h4_map_enc.tobytes(),
-        "lane_map": lane_map_enc.tobytes(),
-        "sign_group": sign_group,
+        # "lane_map": lane_map_enc.tobytes(),
+        # "sign_group": sign_group,
         "trajectory_group": trajectory_group,
         "pcd_xyz": data["pcd_xyz"],
         "pcd_rgb": data["pcd_rgb"],
