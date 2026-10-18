@@ -11,6 +11,7 @@ import yaml
 
 import context
 import tasks.commit
+import utils.commit
 
 
 class DispatchTask(luigi.WrapperTask):
@@ -34,8 +35,11 @@ class DispatchTask(luigi.WrapperTask):
                 prepare_data = msgpack.unpack(f)
             assert isinstance(prepare_data, dict)
 
-            # quality tag check: bit 0 or 1 is set if the quality is good
-            if not (commit_data["quality_tag"] & (0x0000_0011)):
+            # quality tag check
+            quality_tag = commit_data["quality_tag"]
+            if quality_tag in (utils.commit.QualityTag.QUALITY_A | quality_tag & utils.commit.QualityTag.QUALITY_B):
+                ctx.logger.info(f"pass {commit_path} for quality tag check")
+            else:
                 ctx.logger.info(f"continue {commit_path} for quality tag check")
                 continue
 

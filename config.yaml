@@ -20,3 +20,6 @@ dispatch:
   random_downsample: 0.1
   voxel_downsample: 0.001
   kernel_radius: 0.0001
+  extent: 20.0
+  rasterize_res: 128
+  rasterize_highres: 512

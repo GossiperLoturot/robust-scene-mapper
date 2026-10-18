@@ -6,6 +6,7 @@ import msgpack
 import numpy as np
 import open3d as o3d
 import pycolmap
+import scipy.spatial.transform
 
 import context
 import tasks.alignment
@@ -246,6 +247,7 @@ class PrepareAnnotationTask(luigi.Task):
 
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
     commit_coord_path: luigi.StrParameter = luigi.StrParameter()
+    extent: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self) -> list[luigi.Task]:
         # read commit coord data
@@ -360,8 +362,7 @@ class PrepareAnnotationTask(luigi.Task):
         ctx.logger.info(f"pcd_typemap: {pcd_typemap.shape}, pcd_typename: {len(pcd_typename)}")
 
         # crop point cloud
-        extent = 20.0
-        pcd_idx = (pcd_xyz[:, 0] >= -extent) & (pcd_xyz[:, 0] <= extent) & (pcd_xyz[:, 2] >= -extent) & (pcd_xyz[:, 2] <= extent)
+        pcd_idx = (pcd_xyz[:, 0] >= -self.extent) & (pcd_xyz[:, 0] <= self.extent) & (pcd_xyz[:, 2] >= -self.extent) & (pcd_xyz[:, 2] <= self.extent)
         pcd_xyz = pcd_xyz[pcd_idx]
         pcd_rgb = pcd_rgb[pcd_idx]
         pcd_h = pcd_h[pcd_idx]
@@ -400,6 +401,9 @@ class PrepareAnnotationTask(luigi.Task):
 class PackTask(luigi.Task):
     prepare_path: luigi.StrParameter = luigi.StrParameter()
     commit_annotation_path: luigi.StrParameter = luigi.StrParameter()
+    extent: luigi.FloatParameter = luigi.FloatParameter()
+    rasterize_res: luigi.IntParameter = luigi.IntParameter()
+    rasterize_highres: luigi.IntParameter = luigi.IntParameter()
 
     def output(self) -> list[luigi.Target]:
         ctx = context.Context()
@@ -418,16 +422,208 @@ class PackTask(luigi.Task):
         assert isinstance(commit_annotation_data, dict)
         ctx.logger.info(f"commit_annotation_data: {commit_annotation_data.keys()}")
 
-        # merge tracking data and commit data
-        prepare_data["group_tag"] = commit_annotation_data["group_tag"]
-        prepare_data["lane_typemap"] = commit_annotation_data["lane_typemap"]
-        prepare_data["lane_xyz"] = commit_annotation_data["lane_xyz"]  # sequence of 3xN points
-        prepare_data["line_typemap"] = commit_annotation_data["line_typemap"]
-        prepare_data["line_xyz"] = commit_annotation_data["line_xyz"]  # sequence of 3x3(origin, forward, right)xN coordinates
-        prepare_data["other_typemap"] = commit_annotation_data["other_typemap"]
-        prepare_data["other_typename"] = commit_annotation_data["other_typename"]
+        # packing data
 
-        pack_data = utils.commit.pack(prepare_data)
+        # quality tag
+        quality_tag = utils.commit.QualityTag(prepare_data["quality_tag"])
+        quality_tag = [t.name for t in quality_tag]
+
+        # group tag
+        group_tag = utils.commit.GroupTag(commit_annotation_data["group_tag"])
+        group_tag = [t.name for t in group_tag]
+
+        # matrix for 2D projection [4, 4]
+        mat = np.array([
+            [0.5 * self.rasterize_highres / self.extent, 0.0, 0.0, 0.5 * self.rasterize_highres],
+            [0.0, 0.0, 0.5 * self.rasterize_highres / self.extent, 0.5 * self.rasterize_highres],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0]
+        ], dtype=np.float32)
+        ctx.logger.info(f"create projection matrix: {mat}")
+
+        # read point cloud data
+        verts = np.frombuffer(prepare_data["pcd_xyz"], dtype=np.float32).reshape(-1, 3)
+        verts_h = np.frombuffer(prepare_data["pcd_h"], dtype=np.float32).reshape(-1)
+        class_ids = np.frombuffer(prepare_data["pcd_typemap"], dtype=np.uint8).reshape(-1)
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(verts)
+        _, idx = pcd.remove_statistical_outlier(nb_neighbors=32, std_ratio=2.0)
+        verts, verts_h, class_ids = verts[idx], verts_h[idx], class_ids[idx]
+        # extract points in different height levels
+        h0_mask = verts_h <= 0.25
+        h1_mask = (verts_h <= 0.75) & (verts_h > 0.25)
+        h2_mask = (verts_h <= 1.25) & (verts_h > 0.75)
+        h3_mask = (verts_h <= 1.75) & (verts_h > 1.25)
+        h4_mask = (verts_h <= 2.25) & (verts_h > 1.75)
+        # rasterization
+        verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
+        verts_pix = (verts_hom @ mat.T)[:, [0, 1]]
+        h0_map = utils.commit.rasterize_pcd(verts_pix[h0_mask], class_ids[h0_mask], self.rasterize_highres, self.rasterize_res)
+        h1_map = utils.commit.rasterize_pcd(verts_pix[h1_mask], class_ids[h1_mask], self.rasterize_highres, self.rasterize_res)
+        h2_map = utils.commit.rasterize_pcd(verts_pix[h2_mask], class_ids[h2_mask], self.rasterize_highres, self.rasterize_res)
+        h3_map = utils.commit.rasterize_pcd(verts_pix[h3_mask], class_ids[h3_mask], self.rasterize_highres, self.rasterize_res)
+        h4_map = utils.commit.rasterize_pcd(verts_pix[h4_mask], class_ids[h4_mask], self.rasterize_highres, self.rasterize_res)
+        # encode
+        _, h0_map_enc = cv2.imencode(".png", h0_map)
+        _, h1_map_enc = cv2.imencode(".png", h1_map)
+        _, h2_map_enc = cv2.imencode(".png", h2_map)
+        _, h3_map_enc = cv2.imencode(".png", h3_map)
+        _, h4_map_enc = cv2.imencode(".png", h4_map)
+
+        # create trajectory group
+        trajectory_group = dict[str, bytes]()
+        # read ego trajectory
+        ego_trajectory = np.frombuffer(prepare_data["ego_xyz"], dtype=np.float32).reshape(-1, 3)
+        trajectory_group["ego"] = ego_trajectory.tobytes()
+        # read other trajectory
+        other_trajectory = np.frombuffer(prepare_data["other_xyz"], dtype=np.float32).reshape(-1, 3)
+        other_trajectory_typemap = np.frombuffer(commit_annotation_data["other_typemap"], dtype=np.uint8)
+        other_trajectory_typename = commit_annotation_data["other_typename"]
+        for id in np.unique(other_trajectory_typemap):
+            name = other_trajectory_typename[id]
+            trajectory = other_trajectory[other_trajectory_typemap == id]
+            trajectory_group[name] = trajectory.tobytes()
+
+        # create lanes
+        lane_map = {}
+        lane_typemap = commit_annotation_data["lane_typemap"]
+        lane_xyz = np.array(commit_annotation_data["lane_xyz"], dtype=np.float32).reshape(-1, 3)
+        for i in range(len(lane_typemap)):
+            typ = lane_typemap[i]
+            xyz = lane_xyz[i, :]
+
+            lanes = lane_map.get(typ, [])
+            lanes.append(xyz)
+            lane_map[typ] = lanes
+        # compute left and right lane center points for each lane type
+        # (left, right from intersection center perspective)
+        right_lane_xyz, left_lane_xyz, lane_ccw_map = {}, {}, {}
+        for typ, lanes in lane_map.items():
+            mean = np.mean(lanes, axis=0)
+            shiftang = np.arctan2(mean[2], mean[0])
+            shiftrot = scipy.spatial.transform.Rotation.from_rotvec(shiftang * np.array([0, 1, 0]))
+            def key_func(shiftrot: scipy.spatial.transform.Rotation, x: np.ndarray) -> np.ndarray:
+                shiftx = shiftrot.apply(x)
+                return np.arctan2(shiftx[2], shiftx[0])
+            lanes_ccw = sorted(lanes, key=lambda x: key_func(shiftrot, x), reverse=True)
+            right_lane_xyz[typ] = (lanes_ccw[0] + lanes_ccw[1]) * 0.5
+            left_lane_xyz[typ] = (lanes_ccw[-1] + lanes_ccw[-2]) * 0.5
+            lane_ccw_map[typ] = lanes_ccw
+        # connect lanes to form continuous lane lines
+        lane_lines = {}
+        tangent_xyz = utils.commit.compute_tangent_xyz(ego_trajectory, window_length=9, polyorder=2)
+        nearest_idx_in = utils.commit.find_nearest_idx(ego_trajectory, right_lane_xyz[utils.commit.LaneKind.IN.value])
+        nearest_idx_out = utils.commit.find_nearest_idx(ego_trajectory, left_lane_xyz[utils.commit.LaneKind.OUT.value])
+        lane_lines[utils.commit.LaneKind.IN.name] = utils.commit.extend_lane_xyz(
+            utils.commit.connect_lane_xyz(
+                right_lane_xyz[utils.commit.LaneKind.IN.value],
+                left_lane_xyz[utils.commit.LaneKind.IN_OPPOSITE.value],
+                tangent_xyz[nearest_idx_in],
+                interval=0.1,
+            ),
+            extend_length=5.0,
+            interval=0.1
+        ).tobytes()
+        lane_lines[utils.commit.LaneKind.IN_OPPOSITE.name] = utils.commit.extend_lane_xyz(
+            utils.commit.connect_lane_xyz(
+                left_lane_xyz[utils.commit.LaneKind.IN.value],
+                right_lane_xyz[utils.commit.LaneKind.IN_OPPOSITE.value],
+                tangent_xyz[nearest_idx_in],
+                interval=0.1,
+            )[::-1, :],
+            extend_length=5.0,
+            interval=0.1
+        ).tobytes()
+        lane_lines[utils.commit.LaneKind.OUT.name] = utils.commit.extend_lane_xyz(
+            utils.commit.connect_lane_xyz(
+                left_lane_xyz[utils.commit.LaneKind.OUT.value],
+                right_lane_xyz[utils.commit.LaneKind.OUT_OPPOSITE.value],
+                tangent_xyz[nearest_idx_out],
+                interval=0.1,
+            )[::-1, :],
+            extend_length=5.0,
+            interval=0.1
+        ).tobytes()
+        lane_lines[utils.commit.LaneKind.OUT_OPPOSITE.name] = utils.commit.extend_lane_xyz(
+            utils.commit.connect_lane_xyz(
+                right_lane_xyz[utils.commit.LaneKind.OUT.value],
+                left_lane_xyz[utils.commit.LaneKind.OUT_OPPOSITE.value],
+                tangent_xyz[nearest_idx_out],
+                interval=0.1,
+            ),
+            extend_length=5.0,
+            interval=0.1
+        ).tobytes()
+
+        # center offset ego trajectory (-: left, +: right)
+        lane_offset_in = utils.commit.compute_center_offset_xyz(
+            right_lane_xyz[utils.commit.LaneKind.IN.value],
+            tangent_xyz[nearest_idx_in],
+            ego_trajectory
+        )
+        lane_offset_out = utils.commit.compute_center_offset_xyz(
+            left_lane_xyz[utils.commit.LaneKind.OUT.value],
+            tangent_xyz[nearest_idx_out],
+            ego_trajectory
+        )
+        ctx.logger.info(f"lane_offset_in: {lane_offset_in}, lane_offset_out: {lane_offset_out}")
+        # length of lane
+        lane_width_in = utils.commit.compute_lane_width_xyz(
+            lane_ccw_map[utils.commit.LaneKind.IN.value][1],
+            lane_ccw_map[utils.commit.LaneKind.IN.value][0],
+            tangent_xyz[nearest_idx_in]
+        )
+        lane_width_out = utils.commit.compute_lane_width_xyz(
+            lane_ccw_map[utils.commit.LaneKind.OUT.value][-2],
+            lane_ccw_map[utils.commit.LaneKind.OUT.value][-1],
+            tangent_xyz[nearest_idx_out]
+        )
+        ctx.logger.info(f"lane_width_in: {lane_width_in}, lane_width_out: {lane_width_out}")
+        # num of lane
+        lane_num_in = max(0, len(lane_ccw_map[utils.commit.LaneKind.IN.value]) - 1)
+        lane_num_out = max(0, len(lane_ccw_map[utils.commit.LaneKind.OUT.value]) - 1)
+        ctx.logger.info(f"lane_num_in: {lane_num_in}, lane_num_out: {lane_num_out}")
+
+        # create lines
+        lines = []
+        line_typemap = commit_annotation_data["line_typemap"]
+        line_xyz = np.array(commit_annotation_data["line_xyz"], dtype=np.float32).reshape(-1, 3, 3)
+        for i in range(len(line_typemap)):
+            lines.append({
+                "type": utils.commit.LineKind(line_typemap[i]).name,
+                "xyz": line_xyz[i, 0, :].tolist(),
+                "forward": line_xyz[i, 1, :].tolist(),
+                "right": line_xyz[i, 2, :].tolist(),
+            })
+
+        pack_data = {
+            "param": prepare_data["param"],
+            "quality_tag": quality_tag,
+            "group_tag": group_tag,
+            # rasterize
+            "resolution": self.rasterize_highres,
+            "xyz_to_pix": mat.tobytes(),
+            "h0_map": h0_map_enc.tobytes(),
+            "h1_map": h1_map_enc.tobytes(),
+            "h2_map": h2_map_enc.tobytes(),
+            "h3_map": h3_map_enc.tobytes(),
+            "h4_map": h4_map_enc.tobytes(),
+            # structure
+            "trajectory_group": trajectory_group,
+            "lane_lines": lane_lines,
+            "lane_offset_in": lane_offset_in,
+            "lane_offset_out": lane_offset_out,
+            "lane_width_in": lane_width_in,
+            "lane_width_out": lane_width_out,
+            "lane_num_in": lane_num_in,
+            "lane_num_out": lane_num_out,
+            "lines": lines,
+            # pcd
+            "pcd_xyz": prepare_data["pcd_xyz"],
+            "pcd_rgb": prepare_data["pcd_rgb"],
+            "pcd_typemap": prepare_data["pcd_typemap"],
+            "pcd_typename": prepare_data["pcd_typename"],
+        }
         ctx.logger.info(f"pack_data: {pack_data.keys()}")
 
         ctx.logger.info("writing output to database")

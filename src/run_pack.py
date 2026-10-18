@@ -13,7 +13,9 @@ import tasks.commit
 
 
 class DispatchTask(luigi.WrapperTask):
-    kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
+    extent: luigi.FloatParameter = luigi.FloatParameter()
+    rasterize_res: luigi.IntParameter = luigi.IntParameter()
+    rasterize_highres: luigi.IntParameter = luigi.IntParameter()
 
     def requires(self) -> list[luigi.Task]:
         ctx = context.Context()
@@ -28,6 +30,9 @@ class DispatchTask(luigi.WrapperTask):
             task = tasks.commit.PackTask(
                 prepare_path=prepare_path,
                 commit_annotation_path=commit_path,
+                extent=self.extent,
+                rasterize_res=self.rasterize_res,
+                rasterize_highres=self.rasterize_highres,
             )
             all_tasks.append(task)
         return all_tasks

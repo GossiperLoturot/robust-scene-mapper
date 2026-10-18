@@ -16,6 +16,7 @@ import tasks.commit
 class DispatchTask(luigi.WrapperTask):
     voxel_downsample: luigi.FloatParameter = luigi.FloatParameter()
     kernel_radius: luigi.FloatParameter = luigi.FloatParameter()
+    extent: luigi.FloatParameter = luigi.FloatParameter()
 
     def requires(self) -> list[luigi.Task]:
         ctx = context.Context()
@@ -34,6 +35,7 @@ class DispatchTask(luigi.WrapperTask):
                 voxel_downsample=self.voxel_downsample,
                 kernel_radius=self.kernel_radius,
                 commit_coord_path=commit_path,
+                extent=self.extent,
             )
             all_tasks.append(task)
         return all_tasks
