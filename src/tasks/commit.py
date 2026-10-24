@@ -366,6 +366,7 @@ class PrepareAnnotationTask(luigi.Task):
         pcd_xyz = pcd_xyz[pcd_idx]
         pcd_rgb = pcd_rgb[pcd_idx]
         pcd_h = pcd_h[pcd_idx]
+        pcd_typemap = pcd_typemap[pcd_idx]
 
         # read commit tagging data
         with open(self.commit_tagging_path, "rb") as f:
@@ -422,15 +423,15 @@ class PackTask(luigi.Task):
         assert isinstance(commit_annotation_data, dict)
         ctx.logger.info(f"commit_annotation_data: {commit_annotation_data.keys()}")
 
-        # packing data
-
         # quality tag
         quality_tag = utils.commit.QualityTag(prepare_data["quality_tag"])
-        quality_tag = [t.name for t in quality_tag]
+        quality_tag_str = [t.name for t in quality_tag]
+        ctx.logger.info(f"quality_tag: {quality_tag_str}")
 
         # group tag
         group_tag = utils.commit.GroupTag(commit_annotation_data["group_tag"])
-        group_tag = [t.name for t in group_tag]
+        group_tag_str = [t.name for t in group_tag]
+        ctx.logger.info(f"group_tag: {group_tag_str}")
 
         # matrix for 2D projection [4, 4]
         mat = np.array([
@@ -442,6 +443,7 @@ class PackTask(luigi.Task):
         ctx.logger.info(f"create projection matrix: {mat}")
 
         # read point cloud data
+        ctx.logger.info(f"reading point cloud")
         verts = np.frombuffer(prepare_data["pcd_xyz"], dtype=np.float32).reshape(-1, 3)
         verts_h = np.frombuffer(prepare_data["pcd_h"], dtype=np.float32).reshape(-1)
         class_ids = np.frombuffer(prepare_data["pcd_typemap"], dtype=np.uint8).reshape(-1)
@@ -450,12 +452,14 @@ class PackTask(luigi.Task):
         _, idx = pcd.remove_statistical_outlier(nb_neighbors=32, std_ratio=2.0)
         verts, verts_h, class_ids = verts[idx], verts_h[idx], class_ids[idx]
         # extract points in different height levels
+        ctx.logger.info(f"extracting points in different height levels")
         h0_mask = verts_h <= 0.25
         h1_mask = (verts_h <= 0.75) & (verts_h > 0.25)
         h2_mask = (verts_h <= 1.25) & (verts_h > 0.75)
         h3_mask = (verts_h <= 1.75) & (verts_h > 1.25)
         h4_mask = (verts_h <= 2.25) & (verts_h > 1.75)
         # rasterization
+        ctx.logger.info(f"rasterizing point cloud to 2D maps")
         verts_hom = np.hstack([verts, np.ones((verts.shape[0], 1), dtype=np.float32)])
         verts_pix = (verts_hom @ mat.T)[:, [0, 1]]
         h0_map = utils.commit.rasterize_pcd(verts_pix[h0_mask], class_ids[h0_mask], self.rasterize_highres, self.rasterize_res)
@@ -464,6 +468,7 @@ class PackTask(luigi.Task):
         h3_map = utils.commit.rasterize_pcd(verts_pix[h3_mask], class_ids[h3_mask], self.rasterize_highres, self.rasterize_res)
         h4_map = utils.commit.rasterize_pcd(verts_pix[h4_mask], class_ids[h4_mask], self.rasterize_highres, self.rasterize_res)
         # encode
+        ctx.logger.info(f"encoding rasterized maps to image")
         _, h0_map_enc = cv2.imencode(".png", h0_map)
         _, h1_map_enc = cv2.imencode(".png", h1_map)
         _, h2_map_enc = cv2.imencode(".png", h2_map)
@@ -471,6 +476,7 @@ class PackTask(luigi.Task):
         _, h4_map_enc = cv2.imencode(".png", h4_map)
 
         # create trajectory group
+        ctx.logger.info("creating trajectory group")
         trajectory_group = dict[str, bytes]()
         # read ego trajectory
         ego_trajectory = np.frombuffer(prepare_data["ego_xyz"], dtype=np.float32).reshape(-1, 3)
@@ -485,6 +491,7 @@ class PackTask(luigi.Task):
             trajectory_group[name] = trajectory.tobytes()
 
         # create lanes
+        ctx.logger.info("creating lanes")
         lane_map = {}
         lane_typemap = commit_annotation_data["lane_typemap"]
         lane_xyz = np.array(commit_annotation_data["lane_xyz"], dtype=np.float32).reshape(-1, 3)
@@ -510,52 +517,135 @@ class PackTask(luigi.Task):
             left_lane_xyz[typ] = (lanes_ccw[-1] + lanes_ccw[-2]) * 0.5
             lane_ccw_map[typ] = lanes_ccw
         # connect lanes to form continuous lane lines
+        ctx.logger.info("connecting lanes to form continuous lane lines")
         lane_lines = {}
         tangent_xyz = utils.commit.compute_tangent_xyz(ego_trajectory, window_length=9, polyorder=2)
         nearest_idx_in = utils.commit.find_nearest_idx(ego_trajectory, right_lane_xyz[utils.commit.LaneKind.IN.value])
         nearest_idx_out = utils.commit.find_nearest_idx(ego_trajectory, left_lane_xyz[utils.commit.LaneKind.OUT.value])
-        lane_lines[utils.commit.LaneKind.IN.name] = utils.commit.extend_lane_xyz(
-            utils.commit.connect_lane_xyz(
+        # T shape intersection
+        if group_tag & (utils.commit.GroupTag.TSHAPE_MINOR_IN | utils.commit.GroupTag.TSHAPE_MAJOR_IN):
+            if utils.commit.LaneKind.IN_OPPOSITE in lane_ccw_map and utils.commit.LaneKind.OUT_OPPOSITE in lane_ccw_map:
+                raise ValueError("Both IN_OPPOSITE and OUT_OPPOSITE lanes found for T shape intersection")
+            # if exsits IN_OPPOSITE lane, connect IN and IN_OPPOSITE lanes, and connect OUT lane to intersection point.
+            if utils.commit.LaneKind.IN_OPPOSITE in lane_ccw_map:
+                ctx.logger.info("found IN_OPPOSITE lane, connecting IN and IN_OPPOSITE lanes")
+                lane_line_in = utils.commit.connect_path_xyz(
+                    right_lane_xyz[utils.commit.LaneKind.IN.value],
+                    left_lane_xyz[utils.commit.LaneKind.IN_OPPOSITE.value],
+                    tangent_xyz[nearest_idx_in],
+                    interval=0.1,
+                )
+                lane_line_ino = utils.commit.connect_path_xyz(
+                    left_lane_xyz[utils.commit.LaneKind.IN.value],
+                    right_lane_xyz[utils.commit.LaneKind.IN_OPPOSITE.value],
+                    tangent_xyz[nearest_idx_in],
+                    interval=0.1,
+                )[::-1, :]
+                lane_line_out = utils.commit.connect_path_xyz(
+                    left_lane_xyz[utils.commit.LaneKind.OUT.value],
+                    utils.commit.compute_dual_intersection_xyz(
+                        lane_line_in,
+                        lane_line_ino,
+                        left_lane_xyz[utils.commit.LaneKind.OUT.value],
+                        -tangent_xyz[nearest_idx_out]
+                    ),
+                    -tangent_xyz[nearest_idx_out],
+                    interval=0.1,
+                )[::-1, :]
+                lane_line_outo = utils.commit.connect_path_xyz(
+                    right_lane_xyz[utils.commit.LaneKind.OUT.value],
+                    utils.commit.compute_dual_intersection_xyz(
+                        lane_line_in,
+                        lane_line_ino,
+                        right_lane_xyz[utils.commit.LaneKind.OUT.value],
+                        -tangent_xyz[nearest_idx_out]
+                    ),
+                    -tangent_xyz[nearest_idx_out],
+                    interval=0.1,
+                )
+                lane_lines[utils.commit.LaneKind.IN.name] = utils.commit.extend_path_xyz(lane_line_in, len0=5.0, len1=5.0, interval=0.1).tobytes()
+                lane_lines[utils.commit.LaneKind.IN_OPPOSITE.name] = utils.commit.extend_path_xyz(lane_line_ino, len0=5.0, len1=5.0, interval=0.1).tobytes()
+                lane_lines[utils.commit.LaneKind.OUT.name] = utils.commit.extend_path_xyz(lane_line_out, len0=0.0, len1=5.0, interval=0.1).tobytes()
+                lane_lines[utils.commit.LaneKind.OUT_OPPOSITE.name] = utils.commit.extend_path_xyz(lane_line_outo, len0=5.0, len1=0.0, interval=0.1).tobytes()
+            # if exsits OUT_OPPOSITE lane, connect OUT and OUT_OPPOSITE lanes, and connect IN lane to intersection point.
+            elif utils.commit.LaneKind.OUT_OPPOSITE in lane_ccw_map:
+                ctx.logger.info("found OUT_OPPOSITE lane, connecting OUT and OUT_OPPOSITE lanes")
+                lane_line_out = utils.commit.connect_path_xyz(
+                    left_lane_xyz[utils.commit.LaneKind.OUT.value],
+                    right_lane_xyz[utils.commit.LaneKind.OUT_OPPOSITE.value],
+                    -tangent_xyz[nearest_idx_out],
+                    interval=0.1,
+                )[::-1, :]
+                lane_line_outo = utils.commit.connect_path_xyz(
+                    right_lane_xyz[utils.commit.LaneKind.OUT.value],
+                    left_lane_xyz[utils.commit.LaneKind.OUT_OPPOSITE.value],
+                    -tangent_xyz[nearest_idx_out],
+                    interval=0.1,
+                )
+                lane_line_in = utils.commit.connect_path_xyz(
+                    right_lane_xyz[utils.commit.LaneKind.IN.value],
+                    utils.commit.compute_dual_intersection_xyz(
+                        lane_line_out,
+                        lane_line_outo,
+                        right_lane_xyz[utils.commit.LaneKind.IN.value],
+                        tangent_xyz[nearest_idx_in]
+                    ),
+                    tangent_xyz[nearest_idx_in],
+                    interval=0.1,
+                )
+                lane_line_ino = utils.commit.connect_path_xyz(
+                    left_lane_xyz[utils.commit.LaneKind.IN.value],
+                    utils.commit.compute_dual_intersection_xyz(
+                        lane_line_out,
+                        lane_line_outo,
+                        left_lane_xyz[utils.commit.LaneKind.IN.value],
+                        tangent_xyz[nearest_idx_in]
+                    ),
+                    tangent_xyz[nearest_idx_in],
+                    interval=0.1,
+                )[::-1, :]
+                lane_lines[utils.commit.LaneKind.OUT.name] = utils.commit.extend_path_xyz(lane_line_out, len0=5.0, len1=5.0, interval=0.1).tobytes()
+                lane_lines[utils.commit.LaneKind.OUT_OPPOSITE.name] = utils.commit.extend_path_xyz(lane_line_outo, len0=5.0, len1=5.0, interval=0.1).tobytes()
+                lane_lines[utils.commit.LaneKind.IN.name] = utils.commit.extend_path_xyz(lane_line_in, len0=5.0, len1=0.0, interval=0.1).tobytes()
+                lane_lines[utils.commit.LaneKind.IN_OPPOSITE.name] = utils.commit.extend_path_xyz(lane_line_ino, len0=0.0, len1=5.0, interval=0.1).tobytes()
+            else:
+                raise ValueError("No opposite lane found for T shape intersection")
+        # Cross shape intersection
+        else:
+            if utils.commit.LaneKind.IN_OPPOSITE not in lane_ccw_map or utils.commit.LaneKind.OUT_OPPOSITE not in lane_ccw_map:
+                raise ValueError("Both IN_OPPOSITE and OUT_OPPOSITE lanes must be found for Cross shape intersection")
+            ctx.logger.info("found both IN_OPPOSITE and OUT_OPPOSITE lanes, connecting lanes to form continuous lane lines")
+            lane_line_in = utils.commit.connect_path_xyz(
                 right_lane_xyz[utils.commit.LaneKind.IN.value],
                 left_lane_xyz[utils.commit.LaneKind.IN_OPPOSITE.value],
                 tangent_xyz[nearest_idx_in],
                 interval=0.1,
-            ),
-            extend_length=5.0,
-            interval=0.1
-        ).tobytes()
-        lane_lines[utils.commit.LaneKind.IN_OPPOSITE.name] = utils.commit.extend_lane_xyz(
-            utils.commit.connect_lane_xyz(
+            )
+            lane_line_ino = utils.commit.connect_path_xyz(
                 left_lane_xyz[utils.commit.LaneKind.IN.value],
                 right_lane_xyz[utils.commit.LaneKind.IN_OPPOSITE.value],
                 tangent_xyz[nearest_idx_in],
                 interval=0.1,
-            )[::-1, :],
-            extend_length=5.0,
-            interval=0.1
-        ).tobytes()
-        lane_lines[utils.commit.LaneKind.OUT.name] = utils.commit.extend_lane_xyz(
-            utils.commit.connect_lane_xyz(
+            )[::-1, :]
+            lane_line_out = utils.commit.connect_path_xyz(
                 left_lane_xyz[utils.commit.LaneKind.OUT.value],
                 right_lane_xyz[utils.commit.LaneKind.OUT_OPPOSITE.value],
-                tangent_xyz[nearest_idx_out],
+                -tangent_xyz[nearest_idx_out],
                 interval=0.1,
-            )[::-1, :],
-            extend_length=5.0,
-            interval=0.1
-        ).tobytes()
-        lane_lines[utils.commit.LaneKind.OUT_OPPOSITE.name] = utils.commit.extend_lane_xyz(
-            utils.commit.connect_lane_xyz(
+            )[::-1, :]
+            lane_line_outo = utils.commit.connect_path_xyz(
                 right_lane_xyz[utils.commit.LaneKind.OUT.value],
                 left_lane_xyz[utils.commit.LaneKind.OUT_OPPOSITE.value],
-                tangent_xyz[nearest_idx_out],
+                -tangent_xyz[nearest_idx_out],
                 interval=0.1,
-            ),
-            extend_length=5.0,
-            interval=0.1
-        ).tobytes()
+            )
+            lane_lines[utils.commit.LaneKind.IN.name] = utils.commit.extend_path_xyz(lane_line_in, len0=5.0, len1=5.0, interval=0.1).tobytes()
+            lane_lines[utils.commit.LaneKind.IN_OPPOSITE.name] = utils.commit.extend_path_xyz(lane_line_ino, len0=5.0, len1=5.0, interval=0.1).tobytes()
+            lane_lines[utils.commit.LaneKind.OUT.name] = utils.commit.extend_path_xyz(lane_line_out, len0=5.0, len1=5.0, interval=0.1).tobytes()
+            lane_lines[utils.commit.LaneKind.OUT_OPPOSITE.name] = utils.commit.extend_path_xyz(lane_line_outo, len0=5.0, len1=5.0, interval=0.1).tobytes()
 
         # center offset ego trajectory (-: left, +: right)
+        ctx.logger.info("computing lane offset for ego trajectory")
         lane_offset_in = utils.commit.compute_center_offset_xyz(
             right_lane_xyz[utils.commit.LaneKind.IN.value],
             tangent_xyz[nearest_idx_in],
@@ -567,13 +657,15 @@ class PackTask(luigi.Task):
             ego_trajectory
         )
         ctx.logger.info(f"lane_offset_in: {lane_offset_in}, lane_offset_out: {lane_offset_out}")
+
         # length of lane
-        lane_width_in = utils.commit.compute_lane_width_xyz(
+        ctx.logger.info("computing lane width")
+        lane_width_in = utils.commit.compute_path_width_xyz(
             lane_ccw_map[utils.commit.LaneKind.IN.value][1],
             lane_ccw_map[utils.commit.LaneKind.IN.value][0],
             tangent_xyz[nearest_idx_in]
         )
-        lane_width_out = utils.commit.compute_lane_width_xyz(
+        lane_width_out = utils.commit.compute_path_width_xyz(
             lane_ccw_map[utils.commit.LaneKind.OUT.value][-2],
             lane_ccw_map[utils.commit.LaneKind.OUT.value][-1],
             tangent_xyz[nearest_idx_out]
@@ -585,6 +677,7 @@ class PackTask(luigi.Task):
         ctx.logger.info(f"lane_num_in: {lane_num_in}, lane_num_out: {lane_num_out}")
 
         # create lines
+        ctx.logger.info("creating lines")
         lines = []
         line_typemap = commit_annotation_data["line_typemap"]
         line_xyz = np.array(commit_annotation_data["line_xyz"], dtype=np.float32).reshape(-1, 3, 3)
@@ -596,10 +689,11 @@ class PackTask(luigi.Task):
                 "right": line_xyz[i, 2, :].tolist(),
             })
 
+        # pack data
         pack_data = {
             "param": prepare_data["param"],
-            "quality_tag": quality_tag,
-            "group_tag": group_tag,
+            "quality_tag": quality_tag_str,
+            "group_tag": group_tag_str,
             # rasterize
             "resolution": self.rasterize_highres,
             "xyz_to_pix": mat.tobytes(),

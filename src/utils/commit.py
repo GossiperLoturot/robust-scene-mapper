@@ -38,6 +38,9 @@ class GroupTag(enum.IntFlag):
     QUALITY_B = 1 << 16
     QUALITY_C = 1 << 17
 
+    TSHAPE_MINOR_IN = 1 << 18
+    TSHAPE_MAJOR_IN = 1 << 19
+
 
 class LaneKind(enum.IntEnum):
     IN = 0
@@ -53,6 +56,9 @@ class LineKind(enum.IntEnum):
 
 # verts: image space coordinates
 def rasterize_pcd(verts: np.ndarray, class_ids: np.ndarray, output_res: int, rasterize_res: int) -> np.ndarray:
+    verts = np.array(verts, dtype=np.float64)
+    class_ids = np.array(class_ids, dtype=np.int64)
+
     verts = verts / output_res * rasterize_res
     verts = np.round(verts).astype(np.int32)
     idx = (verts[:, 0] >= 0) & (verts[:, 0] < rasterize_res) & (verts[:, 1] >= 0) & (verts[:, 1] < rasterize_res)
@@ -77,130 +83,223 @@ def rasterize_pcd(verts: np.ndarray, class_ids: np.ndarray, output_res: int, ras
     return np.array(image, dtype=np.uint8)
 
 
-def compute_tangent_xyz(trajectory: np.ndarray, window_length: int, polyorder: int) -> np.ndarray:
-    if len(trajectory) < window_length:
-        raise ValueError(f"Trajectory length ({len(trajectory)}) must be greater than window_length ({window_length}).")
+def compute_tangent_xyz(path: np.ndarray, window_length: int, polyorder: int) -> np.ndarray:
+    path = np.array(path, dtype=np.float64)
+
+    if len(path) < window_length:
+        raise ValueError(f"Path length ({len(path)}) must be greater than window_length ({window_length}).")
 
     # compute derivatives using Savitzky-Golay filter
-    dx = scipy.signal.savgol_filter(trajectory[:, 0], window_length=window_length, polyorder=polyorder, deriv=1, axis=0)
-    dy = scipy.signal.savgol_filter(trajectory[:, 1], window_length=window_length, polyorder=polyorder, deriv=1, axis=0)
-    dz = scipy.signal.savgol_filter(trajectory[:, 2], window_length=window_length, polyorder=polyorder, deriv=1, axis=0)
+    dx = scipy.signal.savgol_filter(path[:, 0], window_length=window_length, polyorder=polyorder, deriv=1, axis=0)
+    dy = scipy.signal.savgol_filter(path[:, 1], window_length=window_length, polyorder=polyorder, deriv=1, axis=0)
+    dz = scipy.signal.savgol_filter(path[:, 2], window_length=window_length, polyorder=polyorder, deriv=1, axis=0)
     assert isinstance(dx, np.ndarray) and isinstance(dy, np.ndarray) and isinstance(dz, np.ndarray)
 
     # combine derivatives into a single array
     tangents = np.column_stack([dx, dy, dz])
 
     # normalize the tangent vectors to unit length
-    norms = np.linalg.norm(tangents, axis=1, keepdims=True)
-    return tangents / norms
+    tangents = tangents / np.linalg.norm(tangents, axis=1, keepdims=True)
+    return np.array(tangents, dtype=np.float32)
 
 
-def connect_lane_xy(p0: np.ndarray, p1: np.ndarray, t0: np.ndarray, interval: float) -> np.ndarray:
-    # compute normal vector
-    n0 = np.array([-t0[1], t0[0]], dtype=np.float32)
+def find_nearest_idx(path: np.ndarray, p: np.ndarray) -> int:
+    path = np.array(path, dtype=np.float64)
+    p = np.array(p, dtype=np.float64)
 
-    dp = p1 - p0
-    denom = np.dot(dp, n0)
-    dist = np.linalg.norm(dp)
+    dists = np.linalg.norm(path - p, axis=1)
+    return int(np.argmin(dists))
 
-    # 1. in case of a straight line or very short distance, return linear interpolation
-    if np.abs(denom) < 1e-8 or dist < 1e-8:
-        if dist < 1e-8:
-            return p0.reshape(1, 2)
-        num_points = max(2, int(np.ceil(dist / interval)) + 1)
-        t = np.linspace(0, 1, num_points)[:, np.newaxis]
-        return (1 - t) * p0 + t * p1
 
-    # 2. in casr of a circular arc, compute the center and radius
-    s = np.dot(dp, dp) / (2.0 * denom)
-    c = p0 + s * n0
-    rot = np.abs(s)
+def extend_path_xyz(path: np.ndarray, len0: float, len1: float, interval: float) -> np.ndarray:
+    path = np.array(path, dtype=np.float64)
 
-    # compute angles for p0 and p1 relative to the center
-    v0 = p0 - c
-    v1 = p1 - c
-    theta0 = np.arctan2(v0[1], v0[0])
-    theta1 = np.arctan2(v1[1], v1[0])
+    tangent_xyz = compute_tangent_xyz(path, window_length=9, polyorder=2)
+    p0, t0 = path[0], tangent_xyz[0]
+    p1, t1 = path[-1], tangent_xyz[-1]
+    d0_steps = np.arange(interval, len0, interval, dtype=np.float64)
+    d1_steps = np.arange(interval, len1, interval, dtype=np.float64)
+    tip0_path = np.array([p0 - d * t0 for d in reversed(d0_steps)], dtype=np.float64).reshape(-1, 3)
+    tip1_path = np.array([p1 + d * t1 for d in d1_steps], dtype=np.float64).reshape(-1, 3)
 
-    # compute the angle difference and ensure it is in the range [-pi, pi]
-    dtheta = theta1 - theta0
-    dtheta = (dtheta + np.pi) % (2 * np.pi) - np.pi
-    tangent_check = np.array([-v0[1], v0[0]], dtype=np.float32) if s > 0 else np.array([v0[1], -v0[0]], dtype=np.float32)
-    if np.dot(tangent_check, t0) < 0:
-        if dtheta > 0:
-            dtheta -= 2 * np.pi
-        else:
-            dtheta += 2 * np.pi
+    final_path = np.concat([tip0_path, path, tip1_path], axis=0)
+    return np.array(final_path, dtype=np.float32)
 
-    # compute the number of points based on the arc length and interval
-    arc_length = rot * np.abs(dtheta)
+
+def compute_intersection_xz(path: np.ndarray, p0: np.ndarray, t0: np.ndarray) -> np.ndarray:
+    path = np.array(path, dtype=np.float64)
+    p0 = np.array(p0, dtype=np.float64)
+    t0 = np.array(t0, dtype=np.float64)
+
+    pred_path = path[:-1]
+    succ_path = path[1:]
+    dpath = succ_path - pred_path
+
+    n_segments = len(pred_path)
+
+    # 2. 直線とセグメントの交点を求めるための連立方程式を準備
+    # 直線: p0 + t * t0 (-inf < t < inf)
+    # セグメント: pred_path + s * dpath  (0 <= s <= 1)
+    # 移項して行列形式にする: [t0, -dpath] * [t, s]^T = pred_path - p0
+
+    # A行列の構築 (N - 1, 2, 2)
+    a_mat = np.empty((n_segments, 2, 2), dtype=np.float64)
+    a_mat[:, :, 0] = t0
+    a_mat[:, :, 1] = -dpath
+    b = pred_path - p0
+
+    # 3. 各セグメントに対して連立方程式を解く
+    for i in range(n_segments):
+        # 行列式で平行判定 (0に近い場合は交差しない)
+        det = np.linalg.det(a_mat[i])
+        if np.abs(det) < 1e-8:
+            continue
+
+        try:
+            # np.linalg.solve で t と s を一括計算
+            _, s = np.linalg.solve(a_mat[i], b[i])
+
+            # 条件判定:
+            # - s がセグメント上にあるか (0 <= s <= 1)
+            if 0.0 <= s <= 1.0:
+                # 交点座標の計算
+                xyz = pred_path[i] + s * dpath[i]
+                return np.array(xyz, dtype=np.float32)
+
+        except np.linalg.LinAlgError:
+            continue
+
+    raise ValueError("No intersection found between the line and the path segments.")
+
+
+def compute_intersection_xyz(path: np.ndarray, p0: np.ndarray, t0: np.ndarray) -> np.ndarray:
+    xz = compute_intersection_xz(path[:, [0, 2]], p0[[0, 2]], t0[[0, 2]])
+    return np.array([xz[0], p0[1], xz[1]], dtype=np.float32)
+
+
+def compute_dual_intersection_xyz(path0: np.ndarray, path1: np.ndarray, p_: np.ndarray, t_: np.ndarray) -> np.ndarray:
+    xyz0 = compute_intersection_xyz(path0, p_, t_)
+    xyz1 = compute_intersection_xyz(path1, p_, t_)
+    return (xyz0 + xyz1) * 0.5
+
+
+def connect_path_xy(p0: np.ndarray, p1: np.ndarray, t0: np.ndarray, interval: float) -> np.ndarray:
+    p0 = np.array(p0, dtype=np.float64)
+    p1 = np.array(p1, dtype=np.float64)
+    t0 = np.array(t0, dtype=np.float64)
+
+    # 1. 始点接線の単位ベクトルと法線ベクトルを計算
+    t_norm = np.linalg.norm(t0)
+    if t_norm == 0:
+        raise ValueError("The tangent vector t0 must not be zero.")
+    t_unit = t0 / t_norm
+
+    # 法線ベクトル (反時計回りに90度回転)
+    n_unit = np.array([-t_unit[1], t_unit[0]], dtype=np.float64)
+
+    # 2. 始点から終点への変位ベクトル
+    d = p1 - p0
+
+    if np.linalg.norm(d) < 1e-4:
+        return np.array([p0])
+
+    # 終点が始点の接線方向と完全に平行 (直線上のケース) か判定
+    cross_check = np.dot(d, n_unit)
+
+    if np.abs(cross_check) < 1e-4:
+        # 曲率 0 (直線のケース)
+        total_length = np.linalg.norm(d)
+        num_points = max(2, int(np.ceil(total_length / interval)) + 1)
+        t_vals = np.linspace(0.0, 1.0, num_points, dtype=np.float64)
+        curve = np.outer(1 - t_vals, p0) + np.outer(t_vals, p1)
+        return np.array(curve, dtype=np.float32)
+
+    # 3. 円弧の中心と半径を解析的に計算
+    # 半径 R = |d|^2 / (2 * (d * n_unit))
+    radius_signed = np.dot(d, d) / (2.0 * cross_check)
+    radius = np.abs(radius_signed)
+    center = p0 + radius_signed * n_unit
+
+    # 4. 始点と終点の中心からの相対ベクトルと角度を計算
+    v0 = p0 - center
+    v1 = p1 - center
+
+    alpha0 = np.arctan2(v0[1], v0[0])
+
+    # 符号付きの回転角 (デルタ角) を正確に算出
+    cos_theta = np.dot(v0, v1) / (radius**2)
+    cos_theta = np.clip(cos_theta, -1.0, 1.0)
+    sin_theta = (v0[0] * v1[1] - v0[1] * v1[0]) / (radius ** 2)
+    delta_theta = np.arctan2(sin_theta, cos_theta)
+
+    # 5. 円弧の全長と、指定間隔に基づいたサンプル点の生成
+    arc_length = radius * np.abs(delta_theta)
     num_points = max(2, int(np.ceil(arc_length / interval)) + 1)
+    s_vals = np.linspace(0, arc_length, num_points, dtype=np.float64)
 
-    # generate points along the arc
-    thetas = np.linspace(theta0, theta0 + dtheta, num_points)
-    return np.column_stack([c[0] + rot * np.cos(thetas), c[1] + rot * np.sin(thetas)])
+    # 弧長に比例した角度の配列を生成
+    angles = alpha0 + (s_vals / arc_length) * delta_theta
 
+    # 6. 座標の展開
+    curve_x = center[0] + radius * np.cos(angles)
+    curve_y = center[1] + radius * np.sin(angles)
 
-def connect_lane_xyz(p0: np.ndarray, p1: np.ndarray, t0: np.ndarray, interval: float) -> np.ndarray:
-    xz = connect_lane_xy(p0[[0, 2]], p1[[0, 2]], t0[[0, 2]], interval)
-    y = np.linspace(p0[1], p1[1], xz.shape[0])
-    return np.array([xz[:, 0], y, xz[:, 1]], dtype=np.float32).T
-
-
-def extend_lane_xyz(xyz: np.ndarray, extend_length: float, interval: float) -> np.ndarray:
-    tangent_xyz = compute_tangent_xyz(xyz, window_length=9, polyorder=2)
-    p0, t0 = xyz[0], tangent_xyz[0]
-    p1, t1 = xyz[-1], tangent_xyz[-1]
-    d_steps = np.arange(interval, extend_length, interval)
-    edge0_xyz = np.array([p0 - d * t0 for d in reversed(d_steps)], dtype=np.float32)
-    edge1_xyz = np.array([p1 + d * t1 for d in d_steps], dtype=np.float32)
-    return np.concat([edge0_xyz, xyz, edge1_xyz], axis=0)
+    curve = np.column_stack([curve_x, curve_y])
+    return np.array(curve, dtype=np.float32)
 
 
-def compute_center_offset_xyz(c: np.ndarray, n: np.ndarray, traj: np.ndarray) -> float:
-    return compute_center_offset_xz(c[[0, 2]], n[[0, 2]], traj[:, [0, 2]])
+def connect_path_xyz(p0: np.ndarray, p1: np.ndarray, t0: np.ndarray, interval: float) -> np.ndarray:
+    xz = connect_path_xy(p0[[0, 2]], p1[[0, 2]], t0[[0, 2]], interval)
+    y = np.linspace(p0[1], p1[1], xz.shape[0], dtype=np.float32)
+    xyz = np.column_stack((xz[:, 0], y, xz[:, 1]))
+    return np.array(xyz, dtype=np.float32)
 
 
-def compute_center_offset_xz(c: np.ndarray, n: np.ndarray, traj: np.ndarray) -> float:
+def compute_center_offset_xz(p0: np.ndarray, t0: np.ndarray, path: np.ndarray) -> float:
+    p0 = np.array(p0, dtype=np.float64)
+    t0 = np.array(t0, dtype=np.float64)
+    path = np.array(path, dtype=np.float64)
+
     # d_plane > 0 indicates the direction of the normal vector, < 0 indicates the opposite direction.
-    d_plane = np.dot(traj - c, n)
+    d_plane = np.dot(path - p0, t0)
 
     # segments that cross the line
     sign_change = (d_plane[:-1] * d_plane[1:]) <= 0
     cross_idx = np.where(sign_change)[0]
     if len(cross_idx) == 0:
-        return float('nan')
+        return float("nan")
 
     sdists = []
     for idx in cross_idx:
-        p1 = traj[idx]
-        p2 = traj[idx + 1]
+        p1 = path[idx]
+        p2 = path[idx + 1]
         d1 = d_plane[idx]
         d2 = d_plane[idx + 1]
 
         # the intersection point between the trajectory and the line
         denom = d1 - d2
-        t = 0.0 if np.abs(denom) < 1e-12 else d1 / denom
+        t = 0.0 if np.abs(denom) < 1e-8 else d1 / denom
         intersection_point = (1 - t) * p1 + t * p2
 
         # Project the intersection point onto the direction of the line
         # (right side relative to the normal vector is positive, left side is negative)
-        line_dir = np.array([-n[1], n[0]], dtype=np.float32)
-        sdist = np.dot(intersection_point - c, line_dir)
+        line_dir = np.array([-t0[1], t0[0]], dtype=np.float64)
+        sdist = np.dot(intersection_point - p0, line_dir)
         sdists.append(sdist)
 
-    return float(min(sdists, key=np.abs))
+    offset = min(sdists, key=np.abs)
+    return float(offset)
 
 
-def compute_lane_width_xyz(p0: np.ndarray, p1: np.ndarray, tc: np.ndarray) -> float:
-    return compute_lane_width_xz(p0[[0, 2]], p1[[0, 2]], tc[[0, 2]])
+def compute_center_offset_xyz(p0: np.ndarray, t0: np.ndarray, path: np.ndarray) -> float:
+    return compute_center_offset_xz(p0[[0, 2]], t0[[0, 2]], path[:, [0, 2]])
 
 
-def compute_lane_width_xz(p0: np.ndarray, p1: np.ndarray, tc: np.ndarray) -> float:
-    line_dir = np.array([-tc[1], tc[0]], dtype=np.float32)
-    return float(np.abs(np.dot(p1 - p0, line_dir)))
+def compute_path_width_xz(p0: np.ndarray, p1: np.ndarray, t_: np.ndarray) -> float:
+    dir = np.array([-t_[1], t_[0]], dtype=np.float64)
+    width = np.abs(np.dot(p1 - p0, dir))
+    return float(width)
 
 
-def find_nearest_idx(traj: np.ndarray, p: np.ndarray) -> int:
-    dists = np.linalg.norm(traj - p, axis=1)
-    return int(np.argmin(dists))
+def compute_path_width_xyz(p0: np.ndarray, p1: np.ndarray, t0: np.ndarray) -> float:
+    return compute_path_width_xz(p0[[0, 2]], p1[[0, 2]], t0[[0, 2]])

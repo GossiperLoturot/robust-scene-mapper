@@ -36,11 +36,11 @@ class DispatchTask(luigi.WrapperTask):
             assert isinstance(prepare_data, dict)
 
             # quality tag check
-            quality_tag = commit_data["quality_tag"]
-            if quality_tag in (utils.commit.QualityTag.QUALITY_A | quality_tag & utils.commit.QualityTag.QUALITY_B):
+            quality_tag = utils.commit.QualityTag(commit_data["quality_tag"])
+            if quality_tag & (utils.commit.QualityTag.QUALITY_A | utils.commit.QualityTag.QUALITY_B):
                 ctx.logger.info(f"pass {commit_path} for quality tag check")
             else:
-                ctx.logger.info(f"continue {commit_path} for quality tag check")
+                ctx.logger.info(f"skip {commit_path} for quality tag check")
                 continue
 
             task = tasks.commit.PrepareCoordTask(

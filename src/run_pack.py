@@ -6,10 +6,12 @@ os.environ["HF_HOME"] = ".cache/huggingface"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
 import luigi
+import msgpack
 import yaml
 
 import context
 import tasks.commit
+import utils.commit
 
 
 class DispatchTask(luigi.WrapperTask):
@@ -22,9 +24,21 @@ class DispatchTask(luigi.WrapperTask):
 
         all_tasks = []
         for commit_path in glob.glob(os.path.join(ctx.database_dir, "PrepareAnnotationTask*.commit.msgpack")):
+            with open(commit_path, "rb") as f:
+                commit_data = msgpack.unpack(f)
+            assert isinstance(commit_data, dict)
+
             prepare_path = commit_path.replace(".commit.msgpack", ".msgpack")
             if not os.path.exists(prepare_path):
                 ctx.logger.warning(f"prepare data not found: {prepare_path}")
+                continue
+
+            # quality tag check
+            group_tag = utils.commit.GroupTag(commit_data["group_tag"])
+            if group_tag & (utils.commit.GroupTag.QUALITY_A | utils.commit.GroupTag.QUALITY_B):
+                ctx.logger.info(f"pass {commit_path} for quality tag check")
+            else:
+                ctx.logger.info(f"skip {commit_path} for quality tag check")
                 continue
 
             task = tasks.commit.PackTask(
